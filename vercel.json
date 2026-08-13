@@ -1,0 +1,35 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "npm --prefix frontend ci",
+  "buildCommand": "python backend/manage.py collectstatic --noinput && npm --prefix frontend run build",
+  "outputDirectory": "frontend/dist",
+  "regions": ["iad1"],
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60,
+      "includeFiles": "backend/**",
+      "excludeFiles": "{.venv/**,frontend/node_modules/**,frontend/dist/**,backend/db.sqlite3,**/__pycache__/**,**/*.pyc}"
+    }
+  },
+  "rewrites": [
+    { "source": "/api", "destination": "/api/index.py" },
+    { "source": "/api/(.*)", "destination": "/api/index.py" },
+    { "source": "/django-admin/(.*)", "destination": "/api/index.py" },
+    { "source": "/static/(.*)", "destination": "/api/index.py" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ]
+}
