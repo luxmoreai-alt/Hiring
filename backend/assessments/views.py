@@ -9,6 +9,7 @@ from rest_framework.response import Response as ApiResponse
 from rest_framework import status
 
 from .auth import make_token, read_token
+from .emails import send_completion_email, send_registration_email
 from .models import Attempt, Candidate, CandidateStatusHistory, ProctorEvent, Question, Response
 from .runner import DEFAULT_STARTERS, available_languages, run_code
 
@@ -124,6 +125,8 @@ def attempt_state(attempt):
 
 
 def advance(attempt, auto=False):
+    completed_assessment = False
+    completed_candidate = None
     attempt.current_index += 1
     if attempt.current_index >= len(attempt.question_ids):
         attempt.status = "auto_submitted" if auto else "completed"
@@ -135,13 +138,18 @@ def advance(attempt, auto=False):
         else:
             candidate.status = "completed"
             candidate.completed_at = timezone.now()
+            completed_assessment = True
             if candidate.hiring_status == "assessment_pending":
                 candidate.hiring_status = "assessment_completed"
                 candidate.hiring_status_updated_at = timezone.now()
         candidate.save(update_fields=["status", "completed_at", "hiring_status", "hiring_status_updated_at"])
+        if completed_assessment:
+            completed_candidate = candidate
     else:
         attempt.question_started_at = timezone.now()
     attempt.save()
+    if completed_candidate:
+        send_completion_email(completed_candidate)
 
 
 @api_view(["GET"])
@@ -166,6 +174,7 @@ def register(request):
             return ApiResponse({"token": make_token(existing.id), "candidate": candidate_data(existing), "resumed": True})
         return ApiResponse({"detail": "This email is already registered with a different phone number. Contact the recruiter for help."}, status=409)
     candidate = Candidate.objects.create(**{field: request.data[field].strip() for field in required if field != "email"}, email=email)
+    send_registration_email(candidate)
     return ApiResponse({"token": make_token(candidate.id), "candidate": candidate_data(candidate)}, status=201)
 
 

@@ -1,9 +1,11 @@
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from .auth import make_token
+from .emails import send_completion_email, send_registration_email
 from .models import Candidate, CandidateStatusHistory, Question
 from .runner import available_languages, run_code
 from .views import evaluate_react_solution, public_question
@@ -71,6 +73,37 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["resumed"])
         self.assertEqual(response.data["candidate"]["id"], first["candidate"]["id"])
+
+    @override_settings(
+        EMAIL_NOTIFICATIONS_ENABLED=True,
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="careers@luxmorai.com",
+    )
+    def test_branded_registration_and_completion_emails(self):
+        candidate = Candidate.objects.create(
+            name="Mail Candidate",
+            email="mail-candidate@example.com",
+            phone="9876543210",
+            college="Example Institute",
+            designation="B.Tech CSE",
+            address="Chennai",
+            role="frontend-developer",
+            preferred_location="chennai",
+        )
+        self.assertTrue(send_registration_email(candidate))
+        self.assertTrue(send_completion_email(candidate))
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(mail.outbox[0].to, [candidate.email])
+        self.assertIn("Registration confirmed", mail.outbox[0].subject)
+        self.assertIn("Assessment submitted", mail.outbox[1].subject)
+        self.assertEqual(mail.outbox[0].alternatives[0].mimetype, "text/html")
+        self.assertIn("Luxmor TalentForge", mail.outbox[0].alternatives[0].content)
+        inline_logo = [
+            attachment
+            for attachment in mail.outbox[0].attachments
+            if attachment.get("Content-ID") == "<luxmor-logo>"
+        ]
+        self.assertEqual(len(inline_logo), 1)
 
     def test_code_runner_reports_passes(self):
         results = run_code("a,b=map(int,input().split());print(a+b)", "python", [

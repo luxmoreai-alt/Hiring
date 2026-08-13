@@ -191,21 +191,23 @@ function Landing() {
     }
   };
   return (
-    <main className="landing">
-      <section className="intro-panel">
+    <main className="landing-page">
+      <div className="landing">
+        <section className="intro-panel">
         <Brand light />
         <div className="intro-copy">
           <span className="eyebrow light">
             <span /> Campus recruitment 2026
           </span>
           <h1>
-            Your next chapter
+            Luxmor TalentForge
             <br />
-            starts <em>here.</em>
+            campus hiring <em>starts here.</em>
           </h1>
           <p>
-            One assessment. Real opportunity. Show us how you think, what you
-            know, and what you can build.
+            Luxmor AI Technologies&apos; secure online assessment portal helps
+            campus candidates show how they think, what they know, and what
+            they can build.
           </p>
           <div className="journey-line">
             <div>
@@ -232,8 +234,8 @@ function Landing() {
             <small>Proctored & time-bound</small>
           </span>
         </div>
-      </section>
-      <section className="form-panel">
+        </section>
+        <section className="form-panel">
         <div className="form-wrap">
           <div className="mobile-brand">
             <Brand />
@@ -376,6 +378,47 @@ function Landing() {
         <button className="admin-link" onClick={() => navigate("/admin")}>
           <LayoutDashboard size={15} /> Recruiter access
         </button>
+        </section>
+      </div>
+      <section className="seo-content" aria-labelledby="about-talentforge">
+        <div className="seo-heading">
+          <span className="eyebrow">
+            <span /> Official Luxmor recruitment portal
+          </span>
+          <h2 id="about-talentforge">What is Luxmor TalentForge?</h2>
+          <p>
+            Luxmor TalentForge is Luxmor AI Technologies&apos; secure campus
+            recruitment and online assessment portal. It brings candidate
+            registration, timed evaluations, practical coding, and recruiter
+            review into one focused hiring experience.
+          </p>
+        </div>
+        <div className="seo-answers">
+          <article>
+            <h3>What assessments are included in Luxmor TalentForge?</h3>
+            <p>
+              Candidates complete a 60-question aptitude assessment, 20
+              role-specific technical questions, and two practical coding
+              challenges aligned with their chosen profile.
+            </p>
+          </article>
+          <article>
+            <h3>Which job profiles does Luxmor TalentForge support?</h3>
+            <p>
+              Data Analyst, Frontend Developer, Backend Developer, Full Stack
+              Developer, Software Developer, and Cloud Engineer profiles are
+              supported.
+            </p>
+          </article>
+          <article>
+            <h3>Are candidate results public?</h3>
+            <p>
+              No. Assessment scores, integrity records, and coding results are
+              confidential and available only to authorized Luxmor recruitment
+              staff.
+            </p>
+          </article>
+        </div>
       </section>
     </main>
   );

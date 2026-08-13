@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Luxmor TalentForge</title>
+  <desc id="description">Campus hiring and online assessments from Luxmor AI Technologies</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#19162f"/>
+      <stop offset="1" stop-color="#34256a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9b83ff"/>
+      <stop offset="1" stop-color="#6c4df6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" rx="36" fill="url(#background)"/>
+  <circle cx="1040" cy="90" r="280" fill="#6c4df6" opacity=".13"/>
+  <circle cx="1050" cy="570" r="220" fill="#47bfff" opacity=".09"/>
+  <rect x="88" y="92" width="84" height="84" rx="24" fill="#fff"/>
+  <path d="M115 145V117h30v10h-19v18c0 10 6 17 17 17 8 0 14-3 19-9v15c-6 5-13 7-21 7-17 0-26-11-26-30Z" fill="url(#accent)"/>
+  <text x="200" y="151" fill="#fff" font-family="Arial, sans-serif" font-size="46" font-weight="700">Luxmor</text>
+  <text x="365" y="151" fill="#9b83ff" font-family="Arial, sans-serif" font-size="46" font-weight="700">TalentForge</text>
+  <text x="88" y="302" fill="#fff" font-family="Arial, sans-serif" font-size="68" font-weight="700">Campus talent.</text>
+  <text x="88" y="383" fill="#9b83ff" font-family="Arial, sans-serif" font-size="68" font-weight="700">Measured with clarity.</text>
+  <text x="92" y="466" fill="#c8c2d8" font-family="Arial, sans-serif" font-size="30">Aptitude · Role skills · Practical coding</text>
+  <text x="92" y="535" fill="#fff" font-family="Arial, sans-serif" font-size="24">Luxmor AI Technologies</text>
+</svg>

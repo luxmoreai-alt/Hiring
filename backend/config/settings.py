@@ -163,3 +163,26 @@ REST_FRAMEWORK = {
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# Transactional email
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.zeptomail.in")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "emailapikey")
+EMAIL_HOST_PASSWORD = (
+    os.getenv("EMAIL_HOST_PASSWORD", "").strip()
+    or os.getenv("ZEPTOMAIL_SMTP_PASSWORD", "").strip()
+)
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "false").lower() == "true"
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "10"))
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "careers@luxmorai.com")
+EMAIL_NOTIFICATIONS_ENABLED = bool(EMAIL_HOST_PASSWORD)
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    (
+        "django.core.mail.backends.smtp.EmailBackend"
+        if EMAIL_NOTIFICATIONS_ENABLED
+        else "django.core.mail.backends.dummy.EmailBackend"
+    ),
+)

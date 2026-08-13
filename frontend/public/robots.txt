@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /django-admin/
+
+Sitemap: https://hiring-beta-seven.vercel.app/sitemap.xml

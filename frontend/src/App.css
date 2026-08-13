@@ -70,6 +70,50 @@ h3,
   grid-template-columns: 45% 55%;
   background: #fff;
 }
+.landing-page {
+  min-height: 100vh;
+  background: #fff;
+}
+.seo-content {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 80px 40px 90px;
+}
+.seo-heading {
+  max-width: 790px;
+  margin-bottom: 34px;
+}
+.seo-heading h2 {
+  margin: 14px 0 12px;
+  font-size: clamp(30px, 4vw, 46px);
+  letter-spacing: -1.4px;
+}
+.seo-heading > p {
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.75;
+}
+.seo-answers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.seo-answers article {
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  padding: 24px;
+  background: #faf9fd;
+}
+.seo-answers h3 {
+  font-size: 17px;
+  margin-bottom: 10px;
+}
+.seo-answers p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+  margin: 0;
+}
 .intro-panel {
   position: relative;
   overflow: hidden;
@@ -1682,6 +1726,12 @@ td {
 @media (max-width: 900px) {
   .landing,
   .admin-login {
+    grid-template-columns: 1fr;
+  }
+  .seo-content {
+    padding: 55px 7% 70px;
+  }
+  .seo-answers {
     grid-template-columns: 1fr;
   }
   .intro-panel,
