@@ -32,7 +32,7 @@ The repository is configured as one Vercel project: Vite is served from the CDN 
 
 In Vercel project settings, set **Framework Preset** to `Other` and leave **Install Command**, **Build Command**, and **Output Directory** using the values detected from `vercel.json`. Do not set the Root Directory to `frontend`.
 
-The install phase explicitly installs both `requirements.txt` and the frontend npm packages so Django is available when the build phase runs `collectstatic`.
+The install phase explicitly installs both `requirements.txt` and the frontend npm packages so Django is available when the build phase runs `collectstatic`. It uses Vercel's native `uv pip install --system` and falls back to regular pip outside Vercel.
 
 Add these variables in **Vercel → Project → Settings → Environment Variables** for Production, Preview, and Development:
 
