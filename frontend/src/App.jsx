@@ -1164,6 +1164,7 @@ function AdminDashboard() {
   const [data, setData] = useState(null);
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("");
+  const [collegeFilter, setCollegeFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [hiringFilter, setHiringFilter] = useState("");
   const [assessmentFilter, setAssessmentFilter] = useState("");
@@ -1222,6 +1223,8 @@ function AdminDashboard() {
     return payload.candidate;
   };
   if (!data) return <Loader />;
+  const colleges = [...new Set(data.candidates.map((candidate) => candidate.college.trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
   const rows = data.candidates.filter((c) => {
     const violations = c.rounds.reduce(
       (sum, round) => sum + round.violations,
@@ -1240,6 +1243,7 @@ function AdminDashboard() {
       (integrityFilter === "high" && violations >= 3);
     return (
       (!role || c.role === role) &&
+      (!collegeFilter || c.college === collegeFilter) &&
       (!locationFilter || c.preferred_location === locationFilter) &&
       (!hiringFilter || c.hiring_status === hiringFilter) &&
       (!assessmentFilter || c.status === assessmentFilter) &&
@@ -1507,6 +1511,17 @@ function AdminDashboard() {
                   ))}
                 </select>
                 <select
+                  value={collegeFilter}
+                  onChange={(e) => setCollegeFilter(e.target.value)}
+                >
+                  <option value="">All colleges</option>
+                  {colleges.map((college) => (
+                    <option key={college} value={college}>
+                      {college}
+                    </option>
+                  ))}
+                </select>
+                <select
                   value={locationFilter}
                   onChange={(e) => setLocationFilter(e.target.value)}
                 >
@@ -1560,6 +1575,7 @@ function AdminDashboard() {
                   <option value="below40">Below 40%</option>
                 </select>
                 {(role ||
+                  collegeFilter ||
                   locationFilter ||
                   hiringFilter ||
                   assessmentFilter ||
@@ -1571,6 +1587,7 @@ function AdminDashboard() {
                     onClick={() => {
                       setQuery("");
                       setRole("");
+                      setCollegeFilter("");
                       setLocationFilter("");
                       setHiringFilter("");
                       setAssessmentFilter("");

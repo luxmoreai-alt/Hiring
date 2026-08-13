@@ -8,7 +8,7 @@ import tempfile
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -35,11 +35,15 @@ def _judge0_url(path):
 
 
 def _judge0_request(path, method="GET", payload=None, timeout=15):
-    """Call a private Judge0-compatible evaluator, never a public shared instance."""
+    """Call a self-hosted Judge0 API or the authenticated RapidAPI gateway."""
     headers = {"Accept": "application/json"}
     token = os.environ.get("JUDGE0_AUTH_TOKEN")
     if token:
         headers["X-Auth-Token"] = token
+    rapidapi_key = os.environ.get("JUDGE0_RAPIDAPI_KEY")
+    if rapidapi_key:
+        headers["X-RapidAPI-Key"] = rapidapi_key
+        headers["X-RapidAPI-Host"] = os.environ.get("JUDGE0_RAPIDAPI_HOST") or urlparse(os.environ["JUDGE0_API_URL"]).netloc
     data = None
     if payload is not None:
         headers["Content-Type"] = "application/json"
