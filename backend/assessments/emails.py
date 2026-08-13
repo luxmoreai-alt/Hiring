@@ -41,8 +41,8 @@ def _email_html(*, preheader, eyebrow, heading, greeting, paragraphs, details, c
       <tr><td align="center">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#fff;border:1px solid #e8e5f0;border-radius:18px;overflow:hidden;">
           <tr>
-            <td style="padding:24px 34px;background:#fff;border-bottom:1px solid #eeeaf5;">
-              <img src="cid:luxmor-logo" width="250" alt="Luxmor AI Technologies" style="display:block;width:250px;max-width:80%;height:auto;">
+            <td align="center" style="padding:24px 34px;background:#fff;border-bottom:1px solid #eeeaf5;text-align:center;">
+              <img src="cid:luxmor-logo" width="250" alt="Luxmor AI Technologies" style="display:block;width:250px;max-width:80%;height:auto;margin:0 auto;">
             </td>
           </tr>
           <tr>

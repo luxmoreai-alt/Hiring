@@ -1503,10 +1503,11 @@ td {
 }
 .drawer-person h2 {
   margin: 12px 0 3px;
+  font-size: 27px;
 }
 .drawer-person p {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 .drawer-person i {
   font-style: normal;
@@ -1514,7 +1515,7 @@ td {
   border-radius: 20px;
   background: #f0edff;
   color: var(--purple);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
 }
 .detail-grid {
@@ -1531,13 +1532,21 @@ td {
   flex-direction: column;
 }
 .detail-grid small {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--muted);
 }
 .detail-grid b {
-  font-size: 11px;
-  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: 5px;
   text-transform: capitalize;
+}
+.detail-grid .detail-wide {
+  grid-column: 1 / -1;
+}
+.detail-grid .address-detail b {
+  text-transform: none;
+  white-space: pre-line;
 }
 .workflow-editor {
   background: #f7f6fc;
@@ -1549,6 +1558,12 @@ td {
 }
 .workflow-editor h3 {
   margin: 0 0 3px;
+  font-size: 16px;
+}
+.workflow-editor select,
+.workflow-editor textarea {
+  font-size: 14px;
+  line-height: 1.5;
 }
 .workflow-editor .primary {
   justify-self: end;
@@ -1583,20 +1598,20 @@ td {
   flex: 1;
 }
 .status-timeline b {
-  font-size: 10px;
+  font-size: 12px;
 }
 .status-timeline small {
-  font-size: 8px;
+  font-size: 10px;
   color: var(--muted);
   margin-top: 2px;
 }
 .status-timeline p {
-  font-size: 9px;
+  font-size: 11px;
   margin: 5px 0 0;
   color: #555168;
 }
 .drawer h3 {
-  font-size: 13px;
+  font-size: 15px;
   margin-top: 24px;
 }
 .round-result {
@@ -1604,7 +1619,7 @@ td {
   justify-content: space-between;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 11px;
+  font-size: 13px;
 }
 .round-result span {
   display: flex;
@@ -1612,7 +1627,7 @@ td {
   text-transform: capitalize;
 }
 .round-result small {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--muted);
   margin-top: 3px;
 }
@@ -1643,20 +1658,21 @@ td {
   flex: 1;
 }
 .response-list b {
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 1.4;
 }
 .response-list small {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
   margin-top: 3px;
 }
 .response-list strong {
-  font-size: 10px;
+  font-size: 12px;
 }
 .drawer-loading,
 .loader {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 .loader {
   height: 100vh;

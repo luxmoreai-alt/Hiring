@@ -1737,6 +1737,10 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             <small>Hiring status</small>
             <b>{candidate.hiring_status_label}</b>
           </div>
+          <div className="detail-wide address-detail">
+            <small>Registered address</small>
+            <b>{candidate.address || "Not provided"}</b>
+          </div>
         </div>
         <div className="workflow-editor">
           <h3>Update recruitment status</h3>
