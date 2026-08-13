@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
-  "installCommand": "uv pip install --system -r requirements.txt && npm --prefix frontend install --no-audit --no-fund",
-  "buildCommand": "python backend/manage.py collectstatic --noinput && npm --prefix frontend run build",
+  "installCommand": "npm --prefix frontend install --no-audit --no-fund",
+  "buildCommand": "uv run --no-project --python 3.12 --with-requirements requirements.txt python backend/manage.py collectstatic --noinput && npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
   "regions": ["iad1"],
   "functions": {
