@@ -30,6 +30,10 @@ The built-in code runner is suitable for controlled development. Before acceptin
 
 The repository is configured as one Vercel project: Vite is served from the CDN and Django runs through `api/index.py` as a Python Function. Keep the Vercel project **Root Directory** at the repository root and use the settings from `vercel.json`.
 
+In Vercel project settings, set **Framework Preset** to `Other` and leave **Install Command**, **Build Command**, and **Output Directory** using the values detected from `vercel.json`. Do not set the Root Directory to `frontend`.
+
+The install phase explicitly installs both `requirements.txt` and the frontend npm packages so Django is available when the build phase runs `collectstatic`.
+
 Add these variables in **Vercel → Project → Settings → Environment Variables** for Production, Preview, and Development:
 
 - `DATABASE_URL`: the Neon pooled PostgreSQL URL
