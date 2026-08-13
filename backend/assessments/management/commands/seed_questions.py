@@ -76,7 +76,7 @@ APTITUDE = {
 }
 
 TECH = {
-    "software-developer": [
+    "mern-stack-developer": [
         ("Which data structure uses FIFO order?", "Queue", ["Stack", "Tree", "Heap"]), ("Binary search on a sorted array runs in:", "O(log n)", ["O(n)", "O(n²)", "O(1)"]),
         ("Encapsulation primarily means:", "Bundling data and methods with controlled access", ["Copying objects", "Running code in parallel", "Sorting data"]), ("Which SQL clause filters grouped results?", "HAVING", ["WHERE", "ORDER BY", "JOIN"]),
         ("A process waiting for a resource held by another in a cycle is:", "Deadlock", ["Paging", "Starvation only", "Caching"]), ("Git command that creates a new branch and switches to it:", "git switch -c name", ["git branch -d name", "git merge name", "git fetch name"]),
@@ -127,7 +127,7 @@ TECH = {
 }
 
 CODING = {
-    "software-developer": [
+    "mern-stack-developer": [
         ("Pair Sum", "Given n, target, then n integers, print indices of the first pair whose values sum to target, or -1. Use zero-based indices.", ["5 9\n2 7 11 1 8\n", "4 20\n1 2 3 4\n", "6 10\n5 5 3 7 2 8\n"], ["0 1", "-1", "0 1"]),
         ("Balanced Brackets", "Read one string containing only ()[]{}. Print YES if brackets are balanced, otherwise NO.", ["([]{})\n", "([)]\n", "{{[[(())]]}}\n", "]\n"], ["YES", "NO", "YES", "NO"]),
     ],

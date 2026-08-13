@@ -5,7 +5,7 @@ from django.db import models
 class Candidate(models.Model):
     ROLE_CHOICES = [
         ("data-analyst", "Data Analyst"),
-        ("software-developer", "Software Developer"),
+        ("mern-stack-developer", "MERN Stack Developer"),
         ("frontend-developer", "Frontend Developer"),
         ("backend-developer", "Backend Developer"),
         ("full-stack-developer", "Full Stack Developer"),

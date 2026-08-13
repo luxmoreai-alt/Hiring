@@ -51,4 +51,4 @@ npx vercel --prod
 
 The API runs at `/api`, the recruiter console at `/admin`, and React routes are handled by the SPA fallback. Database migrations are not run during a Vercel build; apply them deliberately from a trusted machine with the production `DATABASE_URL` before deploying schema changes.
 
-Vercel Python Functions are not a secure multi-language code sandbox. For production coding rounds, configure a separate Judge0/Piston-style evaluator; otherwise the language list is limited to runtimes detected inside the function.
+Vercel Python Functions are not a secure multi-language code sandbox. To enable every language in the production coding-round picker, deploy a private, network-isolated [Judge0](https://judge0.com/) instance and set `JUDGE0_API_URL` to its API URL (and `JUDGE0_AUTH_TOKEN` when your instance requires it). The picker then uses the evaluator's live language catalogue and submissions are executed there. Without this setting, the picker remains limited to runtimes detected in the Vercel function. See the [self-hosting guide](docs/judge0-self-hosting.md) for the deployment and connection steps.

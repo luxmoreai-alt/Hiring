@@ -8,6 +8,6 @@ Luxmor TalentForge evaluates candidates through three stages:
 2. A 20-question role-specific technical assessment.
 3. Two practical coding challenges aligned with the selected job profile.
 
-Supported profiles include Data Analyst, Frontend Developer, Backend Developer, Full Stack Developer, Software Developer, and Cloud Engineer.
+Supported profiles include Data Analyst, Frontend Developer, Backend Developer, Full Stack Developer, MERN Stack Developer, and Cloud Engineer.
 
 Candidate assessment scores are confidential and visible only to authorized Luxmor recruitment staff. Candidates should use the official registration form at https://hiring-beta-seven.vercel.app/.

@@ -55,7 +55,7 @@ const roles = [
     "Full Stack Developer",
     "Frontend, backend & integration",
   ],
-  ["software-developer", "Software Developer", "DSA, systems & engineering"],
+  ["mern-stack-developer", "MERN Stack Developer", "MongoDB, Express, React & Node.js"],
   ["cloud-engineer", "Cloud Engineer", "Infrastructure, reliability & cloud"],
 ];
 const locations = [
@@ -298,14 +298,18 @@ function Landing() {
               </label>
             </div>
             <label>
-              Address
+              Permanent address (as per Aadhaar)
               <textarea
                 required
                 rows="2"
                 value={form.address}
                 onChange={set("address")}
-                placeholder="Current address"
+                placeholder="Enter your full permanent address as shown on Aadhaar"
               />
+              <small className="field-help">
+                Please enter your full permanent address exactly as on your
+                Aadhaar. It will be used for office-letter processing.
+              </small>
             </label>
             <div className="field-row">
               <label>
@@ -406,7 +410,7 @@ function Landing() {
             <h3>Which job profiles does Luxmor TalentForge support?</h3>
             <p>
               Data Analyst, Frontend Developer, Backend Developer, Full Stack
-              Developer, Software Developer, and Cloud Engineer profiles are
+              Developer, MERN Stack Developer, and Cloud Engineer profiles are
               supported.
             </p>
           </article>

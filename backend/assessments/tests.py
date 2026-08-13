@@ -3,11 +3,12 @@ from django.core import mail
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
 from .auth import make_token
 from .emails import send_completion_email, send_registration_email
 from .models import Candidate, CandidateStatusHistory, Question
-from .runner import available_languages, run_code
+from .runner import _judge0_languages_cache, available_languages, run_code
 from .views import evaluate_react_solution, public_question
 
 
@@ -24,7 +25,7 @@ class AssessmentFlowTests(TestCase):
         response = self.client.post("/api/candidates/register/", {
             "name": "Test Student", "email": "student@example.com", "phone": "9876543210",
             "college": "Example Institute", "designation": "B.Tech CSE",
-            "address": "Hyderabad", "role": "software-developer", "preferred_location": "hyderabad",
+            "address": "Hyderabad", "role": "mern-stack-developer", "preferred_location": "hyderabad",
         }, format="json")
         self.assertEqual(response.status_code, 201)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['token']}")
@@ -32,8 +33,8 @@ class AssessmentFlowTests(TestCase):
 
     def test_question_bank_has_required_counts(self):
         self.assertEqual(Question.objects.filter(round_type="aptitude").count(), 60)
-        self.assertEqual(Question.objects.filter(round_type="technical", role="software-developer").count(), 20)
-        self.assertEqual(Question.objects.filter(round_type="coding", role="software-developer").count(), 2)
+        self.assertEqual(Question.objects.filter(round_type="technical", role="mern-stack-developer").count(), 20)
+        self.assertEqual(Question.objects.filter(round_type="coding", role="mern-stack-developer").count(), 2)
         for role in ("frontend-developer", "backend-developer", "full-stack-developer"):
             self.assertEqual(Question.objects.filter(round_type="technical", role=role).count(), 20)
             self.assertEqual(Question.objects.filter(round_type="coding", role=role).count(), 2)
@@ -68,7 +69,7 @@ class AssessmentFlowTests(TestCase):
         response = self.client.post("/api/candidates/register/", {
             "name": "Test Student", "email": "student@example.com", "phone": "9876543210",
             "college": "Example Institute", "designation": "B.Tech CSE",
-            "address": "Hyderabad", "role": "software-developer", "preferred_location": "hyderabad",
+            "address": "Hyderabad", "role": "mern-stack-developer", "preferred_location": "hyderabad",
         }, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["resumed"])
@@ -122,6 +123,17 @@ class AssessmentFlowTests(TestCase):
         for language in [item["value"] for item in available_languages()]:
             with self.subTest(language=language):
                 self.assertTrue(run_code(solutions[language], language, cases)[0]["passed"])
+
+    @override_settings()
+    @patch.dict("os.environ", {"JUDGE0_API_URL": "https://judge.example.com"}, clear=False)
+    @patch("assessments.runner._judge0_request")
+    def test_judge0_catalogue_is_used_when_configured(self, request):
+        _judge0_languages_cache.update(expires=0, languages=[])
+        request.return_value = [{"id": 71, "name": "Python (3.8.1)"}, {"id": 63, "name": "JavaScript (Node.js 12.14.0)"}]
+        self.assertEqual(available_languages(), [
+            {"value": "judge0:71", "label": "Python (3.8.1)"},
+            {"value": "judge0:63", "label": "JavaScript (Node.js 12.14.0)"},
+        ])
 
     def test_staff_dashboard(self):
         candidate = Candidate.objects.create(name="A", email="a@example.com", phone="99999999", college="C", designation="B.Tech", address="X", role="data-analyst")
