@@ -31,6 +31,83 @@ BACKEND_CODING = [
     ("Merge Request Windows", "Read n time intervals (start end). Merge every overlapping interval and print the merged intervals in ascending order, one per line.", ["4\n1 3\n2 6\n8 10\n9 12\n", "3\n1 2\n3 4\n5 6\n", "4\n1 10\n2 3\n4 8\n11 12\n"], ["1 6\n8 12", "1 2\n3 4\n5 6", "1 10\n11 12"]),
 ]
 
+FRONTEND_CODING = [
+    {
+        "title": "SaaS Landing Page Makeover",
+        "description": (
+            "Transform the basic NovaFlow screen into a polished responsive landing page.\n\n"
+            "Requirements:\n"
+            "1. Add a semantic navigation bar with working anchor links.\n"
+            "2. Build a hero section with a clear call-to-action button.\n"
+            "3. Render at least three feature cards from an array using map().\n"
+            "4. Add responsive CSS using a media query or fluid clamp() sizing.\n"
+            "5. Include accessible labels or useful image alt text.\n\n"
+            "Keep the component named App. Use the live preview while designing."
+        ),
+        "starter": """const features = [
+  { title: 'Fast setup', text: 'Launch your workflow in minutes.' },
+  { title: 'Clear insights', text: 'Understand progress at a glance.' },
+  { title: 'Team ready', text: 'Keep everyone moving together.' },
+];
+
+function App() {
+  return (
+    <main style={{ fontFamily: 'Inter, sans-serif', padding: 32 }}>
+      <h1>NovaFlow</h1>
+      <p>Plan, collaborate, and ship better work.</p>
+      {/* Build the navigation, hero, feature grid, and responsive styles. */}
+    </main>
+  );
+}
+""",
+        "tests": [
+            {"label": "Semantic navigation with links", "all": ["<nav", "href="], "hint": "Add a <nav> containing anchor links."},
+            {"label": "Hero section and call-to-action", "all": ["hero", "<button"], "hint": "Create a hero section and CTA button."},
+            {"label": "Feature cards rendered with map()", "all": ["features", ".map("], "hint": "Map the features array into reusable cards."},
+            {"label": "Responsive or fluid styling", "any": ["@media", "clamp("], "hint": "Add an @media rule or use clamp() for fluid sizing."},
+            {"label": "Accessible labels or image text", "any": ["aria-label", "alt="], "hint": "Add an aria-label or meaningful image alt text."},
+        ],
+    },
+    {
+        "title": "Interactive Pricing and FAQ Page",
+        "description": (
+            "Create a responsive pricing section with an interactive billing choice and FAQ.\n\n"
+            "Requirements:\n"
+            "1. Use React state and an onClick interaction for monthly/yearly billing.\n"
+            "2. Render pricing plans from an array using map().\n"
+            "3. Visually highlight one recommended plan.\n"
+            "4. Add an accessible expandable FAQ using aria-expanded.\n"
+            "5. Make the layout responsive with a media query or fluid clamp() sizing.\n\n"
+            "Keep the component named App. The preview runs in an isolated frame."
+        ),
+        "starter": """const { useState } = React;
+
+const plans = [
+  { name: 'Starter', monthly: 12, yearly: 9 },
+  { name: 'Growth', monthly: 29, yearly: 22 },
+  { name: 'Scale', monthly: 59, yearly: 45 },
+];
+
+function App() {
+  return (
+    <main style={{ fontFamily: 'Inter, sans-serif', padding: 32 }}>
+      <h1>Simple pricing</h1>
+      <p>Choose a plan that grows with your team.</p>
+      {/* Add billing state, plan cards, an FAQ, and responsive styles. */}
+    </main>
+  );
+}
+""",
+        "tests": [
+            {"label": "Interactive billing state", "all": ["usestate(", "onclick="], "hint": "Use useState() and an onClick handler for billing."},
+            {"label": "Pricing cards rendered with map()", "all": ["plans", ".map("], "hint": "Map the plans array into pricing cards."},
+            {"label": "Recommended plan is highlighted", "any": ["recommended", "popular", "featured"], "hint": "Label or style one plan as recommended."},
+            {"label": "Accessible expandable FAQ", "all": ["faq", "aria-expanded"], "hint": "Create an FAQ control with aria-expanded."},
+            {"label": "Responsive or fluid styling", "any": ["@media", "clamp("], "hint": "Add an @media rule or use clamp() for fluid sizing."},
+        ],
+    },
+]
+
 
 class Command(BaseCommand):
     help = "Create independent Frontend, Backend, and Full Stack assessment banks"
@@ -67,13 +144,14 @@ class Command(BaseCommand):
                 explanation=source.explanation,
             )
 
-        frontend_coding = list(Question.objects.filter(role="web-developer", round_type="coding", active=True).order_by("id")[:2])
-        for source in frontend_coding:
-            Question.objects.create(
-                round_type="coding", category="coding", role="frontend-developer", prompt=source.prompt,
-                starter_code=source.starter_code, test_cases=source.test_cases,
-                visible_test_count=source.visible_test_count,
-            )
+        frontend_coding = []
+        for challenge in FRONTEND_CODING:
+            frontend_coding.append(Question.objects.create(
+                round_type="coding", category="coding", role="frontend-developer",
+                prompt=f"{challenge['title']}\n\n{challenge['description']}",
+                starter_code={"react": challenge["starter"]},
+                test_cases=challenge["tests"], visible_test_count=len(challenge["tests"]),
+            ))
         backend_created = []
         for title, description, inputs, outputs in BACKEND_CODING:
             backend_created.append(Question.objects.create(

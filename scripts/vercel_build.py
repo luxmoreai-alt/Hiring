@@ -15,4 +15,5 @@ from django.core.management import call_command  # noqa: E402
 django.setup()
 call_command("migrate", interactive=False)
 call_command("ensure_admin")
+call_command("seed_frontend_challenges")
 call_command("collectstatic", interactive=False)

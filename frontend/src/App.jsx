@@ -92,11 +92,36 @@ const roundMeta = {
   },
 };
 const languageLabels = {
+  react: "React (JSX)",
   python: "Python 3",
   javascript: "JavaScript (Node.js)",
   typescript: "TypeScript",
   java: "Java 17",
 };
+
+function reactPreviewDocument(code) {
+  const candidateSource = `${code}\nwindow.__CandidateApp = typeof App !== 'undefined' ? App : null;`;
+  const serialized = JSON.stringify(candidateSource).replace(/</g, "\\u003c");
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body,#root{margin:0;min-height:100%;font-family:Inter,Arial,sans-serif}.preview-loading,.preview-error{padding:24px;color:#5d5870}.preview-error{color:#b42335;white-space:pre-wrap}</style></head>
+<body><div id="root"><div class="preview-loading">Loading React preview...</div></div>
+<script>window.addEventListener('error',function(e){document.getElementById('root').innerHTML='<div class="preview-error">'+String(e.message).replace(/</g,'&lt;')+'</div>';});</script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script>
+try {
+  const source = ${serialized};
+  const compiled = Babel.transform(source, { presets: ['react'] }).code;
+  (0, eval)(compiled);
+  if (!window.__CandidateApp) throw new Error('Keep your component named App.');
+  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(window.__CandidateApp));
+} catch (error) {
+  document.getElementById('root').innerHTML = '<div class="preview-error">'+String(error.message).replace(/</g,'&lt;')+'</div>';
+}
+</script></body></html>`;
+}
 
 async function request(path, options = {}, admin = false) {
   const token = localStorage.getItem(admin ? "adminToken" : "candidateToken");
@@ -605,6 +630,7 @@ function Assessment() {
   const [state, setState] = useState(null);
   const [selected, setSelected] = useState(null);
   const [code, setCode] = useState("");
+  const [previewCode, setPreviewCode] = useState("");
   const [language, setLanguage] = useState("python");
   const [remaining, setRemaining] = useState(0);
   const [blocked, setBlocked] = useState(!document.fullscreenElement);
@@ -617,8 +643,17 @@ function Assessment() {
       const data = await request(`/rounds/${type}/state/`);
       setState(data);
       setRemaining(data.remaining_seconds || 0);
-      if (data.question?.starter_code)
-        setCode(data.question.starter_code[language] || "");
+      if (data.question?.starter_code) {
+        const values = (data.question.languages || []).map((item) =>
+          typeof item === "string" ? item : item.value,
+        );
+        const nextLanguage = values.includes(language) ? language : values[0];
+        if (nextLanguage && nextLanguage !== language)
+          setLanguage(nextLanguage);
+        const starter = data.question.starter_code[nextLanguage] || "";
+        setCode(starter);
+        setPreviewCode(starter);
+      }
     } catch (e) {
       setError(e.message);
     }
@@ -626,6 +661,10 @@ function Assessment() {
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    const timer = setTimeout(() => setPreviewCode(code), 500);
+    return () => clearTimeout(timer);
+  }, [code]);
   const logEvent = useCallback(
     (event_type) =>
       request("/proctor/events/", {
@@ -681,7 +720,15 @@ function Assessment() {
         setSelected(null);
         setRunResults(null);
         if (state.next_question.starter_code) {
-          setCode(state.next_question.starter_code[language] || "");
+          const nextValues = (state.next_question.languages || []).map((item) =>
+            typeof item === "string" ? item : item.value,
+          );
+          const nextLanguage = nextValues.includes(language)
+            ? language
+            : nextValues[0];
+          if (nextLanguage && nextLanguage !== language)
+            setLanguage(nextLanguage);
+          setCode(state.next_question.starter_code[nextLanguage] || "");
         }
       }
       const data = await request(`/rounds/${type}/answer/`, {
@@ -692,8 +739,15 @@ function Assessment() {
       setRunResults(null);
       setState(data.state);
       setRemaining(data.state.remaining_seconds || 0);
-      if (data.state.question?.starter_code)
-        setCode(data.state.question.starter_code[language] || "");
+      if (data.state.question?.starter_code) {
+        const values = (data.state.question.languages || []).map((item) =>
+          typeof item === "string" ? item : item.value,
+        );
+        const nextLanguage = values.includes(language) ? language : values[0];
+        if (nextLanguage && nextLanguage !== language)
+          setLanguage(nextLanguage);
+        setCode(data.state.question.starter_code[nextLanguage] || "");
+      }
       if (data.state.status !== "in_progress") {
         if (document.fullscreenElement)
           await document.exitFullscreen().catch(() => {});
@@ -790,17 +844,32 @@ function Assessment() {
             <p className="problem-copy">
               {q.prompt.split("\n").slice(2).join("\n")}
             </p>
-            <h4>Sample test cases</h4>
-            {q.visible_tests.map((t, i) => (
-              <div className="sample" key={i}>
-                <span>Input</span>
-                <pre>{t.input}</pre>
-                <span>Expected output</span>
-                <pre>{t.output}</pre>
+            <h4>
+              {q.workspace === "react"
+                ? "Evaluation checklist"
+                : "Sample test cases"}
+            </h4>
+            {q.workspace === "react" ? (
+              <div className="ui-checklist">
+                {q.visible_tests.map((item, index) => (
+                  <div key={item.label}>
+                    <Check size={15} />
+                    <span>{index + 1}. {item.label}</span>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              q.visible_tests.map((t, i) => (
+                <div className="sample" key={i}>
+                  <span>Input</span>
+                  <pre>{t.input}</pre>
+                  <span>Expected output</span>
+                  <pre>{t.output}</pre>
+                </div>
+              ))
+            )}
           </section>
-          <section className="editor-pane">
+          <section className={`editor-pane ${q.workspace === "react" ? "react-editor-pane" : ""}`}>
             <div className="editor-bar">
               <select
                 value={language}
@@ -819,7 +888,9 @@ function Assessment() {
                   );
                 })}
               </select>
-              <span>stdin / stdout</span>
+              <span>
+                {q.workspace === "react" ? "React component / live preview" : "stdin / stdout"}
+              </span>
             </div>
             <textarea
               spellCheck="false"
@@ -827,13 +898,24 @@ function Assessment() {
               onChange={(e) => setCode(e.target.value)}
               className="code-editor"
             />
+            {q.workspace === "react" && (
+              <div className="live-preview">
+                <div><b>Live preview</b><span>Updates automatically</span></div>
+                <iframe
+                  title="Candidate React preview"
+                  sandbox="allow-scripts"
+                  referrerPolicy="no-referrer"
+                  srcDoc={reactPreviewDocument(previewCode)}
+                />
+              </div>
+            )}
             {runResults && (
               <div className="test-results">
                 {runResults.map((r, i) => (
                   <div className={r.passed ? "pass" : "fail"} key={i}>
                     {r.passed ? <Check /> : <X />}
                     <span>
-                      <b>Sample {i + 1}</b>
+                      <b>{q.workspace === "react" ? r.label || `Requirement ${i + 1}` : `Sample ${i + 1}`}</b>
                       <small>
                         {r.passed
                           ? "Passed"
@@ -847,7 +929,7 @@ function Assessment() {
             )}
             <div className="editor-actions">
               <button className="secondary" onClick={run} disabled={busy}>
-                <Play size={16} /> Run samples
+                <Play size={16} /> {q.workspace === "react" ? "Check requirements" : "Run samples"}
               </button>
               <button
                 className="primary"

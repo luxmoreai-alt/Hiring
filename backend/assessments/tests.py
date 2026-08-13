@@ -6,6 +6,7 @@ from rest_framework.test import APIClient
 from .auth import make_token
 from .models import Candidate, CandidateStatusHistory, Question
 from .runner import available_languages, run_code
+from .views import evaluate_react_solution, public_question
 
 
 class AssessmentFlowTests(TestCase):
@@ -34,6 +35,16 @@ class AssessmentFlowTests(TestCase):
         for role in ("frontend-developer", "backend-developer", "full-stack-developer"):
             self.assertEqual(Question.objects.filter(round_type="technical", role=role).count(), 20)
             self.assertEqual(Question.objects.filter(round_type="coding", role=role).count(), 2)
+        frontend = Question.objects.filter(round_type="coding", role="frontend-developer").first()
+        self.assertEqual(public_question(frontend)["workspace"], "react")
+        self.assertEqual(public_question(frontend)["languages"], [{"value": "react", "label": "React (JSX)"}])
+
+    def test_react_challenge_evaluator_reports_requirements(self):
+        results = evaluate_react_solution(
+            "function App(){ return <nav><a href='#work'>Work</a></nav>; }",
+            [{"label": "Navigation", "all": ["<nav", "href="]}],
+        )
+        self.assertTrue(results[0]["passed"])
 
     def test_register_start_and_answer(self):
         self.register_candidate()

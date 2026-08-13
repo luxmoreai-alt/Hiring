@@ -71,11 +71,39 @@ def candidate_data(candidate, detailed=False, include_results=False):
 def public_question(question):
     data = {"id": question.id, "prompt": question.prompt, "category": question.category, "round_type": question.round_type}
     if question.round_type == "coding":
-        starters = {**DEFAULT_STARTERS, **question.starter_code}
-        data.update({"starter_code": starters, "visible_tests": question.test_cases[:question.visible_test_count], "languages": available_languages()})
+        react_workspace = "react" in question.starter_code
+        starters = question.starter_code if react_workspace else {**DEFAULT_STARTERS, **question.starter_code}
+        languages = ([{"value": "react", "label": "React (JSX)"}]
+                     if react_workspace else available_languages())
+        data.update({
+            "starter_code": starters,
+            "visible_tests": question.test_cases[:question.visible_test_count],
+            "languages": languages,
+            "workspace": "react" if react_workspace else "console",
+        })
     else:
         data["options"] = question.options
     return data
+
+
+def evaluate_react_solution(code, test_cases):
+    """Evaluate UI requirements without executing untrusted browser code on the API."""
+    normalized = " ".join(code.lower().split())
+    results = []
+    for case in test_cases:
+        required = [term.lower() for term in case.get("all", [])]
+        alternatives = [term.lower() for term in case.get("any", [])]
+        missing = [term for term in required if term not in normalized]
+        alternative_found = not alternatives or any(term in normalized for term in alternatives)
+        passed = not missing and alternative_found
+        results.append({
+            "passed": passed,
+            "actual": "Requirement detected" if passed else "Implementation not detected",
+            "expected": case.get("label", "UI requirement"),
+            "label": case.get("label", "UI requirement"),
+            "error": "" if passed else case.get("hint", "Complete this requirement and check again."),
+        })
+    return results
 
 
 def attempt_state(attempt):
@@ -193,10 +221,14 @@ def submit_answer(request, round_type):
     response = Response(attempt=attempt, question=question, timed_out=timed_out)
     if round_type == "coding" and not timed_out:
         language = request.data.get("language", "python")
-        if language not in {item["value"] for item in available_languages()}:
+        react_workspace = "react" in question.starter_code
+        allowed_languages = ({"react"} if react_workspace
+                             else {item["value"] for item in available_languages()})
+        if language not in allowed_languages:
             return ApiResponse({"detail": "Unsupported language"}, status=400)
         code = request.data.get("code", "")
-        results = run_code(code, language, question.test_cases)
+        results = (evaluate_react_solution(code, question.test_cases)
+                   if react_workspace else run_code(code, language, question.test_cases))
         passed = sum(1 for result in results if result["passed"])
         response.code, response.language = code, language
         response.passed_tests, response.total_tests = passed, len(results)
@@ -222,8 +254,13 @@ def try_code(request, round_type):
     question = cached_question(attempt.question_ids[attempt.current_index])
     if question.round_type != "coding": return ApiResponse({"detail": "Not a coding question"}, status=400)
     language = request.data.get("language", "python")
-    if language not in {item["value"] for item in available_languages()}: return ApiResponse({"detail": "Unsupported language"}, status=400)
-    results = run_code(request.data.get("code", ""), language, question.test_cases[:question.visible_test_count])
+    react_workspace = "react" in question.starter_code
+    allowed_languages = ({"react"} if react_workspace
+                         else {item["value"] for item in available_languages()})
+    if language not in allowed_languages: return ApiResponse({"detail": "Unsupported language"}, status=400)
+    code = request.data.get("code", "")
+    results = (evaluate_react_solution(code, question.test_cases[:question.visible_test_count])
+               if react_workspace else run_code(code, language, question.test_cases[:question.visible_test_count]))
     return ApiResponse({"results": results})
 
 
