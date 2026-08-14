@@ -1450,6 +1450,18 @@ td {
 .view-btn svg {
   width: 14px;
 }
+.delete-btn {
+  border: 0;
+  background: #fff0f1;
+  color: #d92d45;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  margin-left: 7px;
+}
+.delete-btn svg {
+  width: 14px;
+}
 .empty {
   text-align: center;
   padding: 30px;

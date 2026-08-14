@@ -173,3 +173,11 @@ class AssessmentFlowTests(TestCase):
         candidate.refresh_from_db()
         self.assertEqual(candidate.hiring_status, "technical_completed")
         self.assertTrue(CandidateStatusHistory.objects.filter(candidate=candidate, to_status="technical_completed").exists())
+
+    def test_staff_can_delete_candidate(self):
+        candidate = Candidate.objects.create(name="Delete Me", email="delete@example.com", phone="99999999", college="C", designation="B.Tech", address="X", role="data-analyst")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
+        response = self.client.delete(f"/api/staff/candidates/{candidate.id}/delete/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["deleted"])
+        self.assertFalse(Candidate.objects.filter(id=candidate.id).exists())

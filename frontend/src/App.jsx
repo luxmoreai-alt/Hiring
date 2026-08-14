@@ -23,6 +23,7 @@ import {
   Play,
   Search,
   ShieldCheck,
+  Trash2,
   Trophy,
   UserRound,
   UsersRound,
@@ -1222,6 +1223,22 @@ function AdminDashboard() {
     setDetail(payload.candidate);
     return payload.candidate;
   };
+  const deleteCandidate = async (candidate) => {
+    if (!window.confirm(`Delete ${candidate.name} and all of their assessment data? This cannot be undone.`)) return;
+    try {
+      await request(`/staff/candidates/${candidate.id}/delete/`, { method: "DELETE" }, true);
+      setData((current) => ({
+        ...current,
+        candidates: current.candidates.filter((item) => item.id !== candidate.id),
+      }));
+      if (selected?.id === candidate.id) {
+        setSelected(null);
+        setDetail(null);
+      }
+    } catch (error) {
+      window.alert(error.message);
+    }
+  };
   if (!data) return <Loader />;
   const colleges = [...new Set(data.candidates.map((candidate) => candidate.college.trim()).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right));
@@ -1668,6 +1685,14 @@ function AdminDashboard() {
                       <td>
                         <button className="view-btn" onClick={() => open(c)}>
                           <Eye />
+                        </button>
+                        <button
+                          className="delete-btn"
+                          aria-label={`Delete ${c.name}`}
+                          title="Delete candidate"
+                          onClick={() => deleteCandidate(c)}
+                        >
+                          <Trash2 />
                         </button>
                       </td>
                     </tr>

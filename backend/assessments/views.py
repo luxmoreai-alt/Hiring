@@ -343,6 +343,14 @@ def admin_candidate(request, candidate_id):
     return ApiResponse(candidate_data(get_object_or_404(Candidate, id=candidate_id), detailed=True, include_results=True))
 
 
+@api_view(["DELETE"])
+def admin_candidate_delete(request, candidate_id):
+    require_admin(request)
+    candidate = get_object_or_404(Candidate, id=candidate_id)
+    candidate.delete()
+    return ApiResponse({"deleted": True})
+
+
 @api_view(["PATCH"])
 def admin_candidate_status(request, candidate_id):
     admin_user = require_admin(request)
