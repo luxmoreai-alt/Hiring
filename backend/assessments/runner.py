@@ -36,7 +36,11 @@ def _judge0_url(path):
 
 def _judge0_request(path, method="GET", payload=None, timeout=15):
     """Call a self-hosted Judge0 API or the authenticated RapidAPI gateway."""
-    headers = {"Accept": "application/json"}
+    # RapidAPI/Judge0's edge protection rejects Python urllib's default user agent.
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "LuxmoreTalentForge/1.0 (+https://luxmore.ai)",
+    }
     token = os.environ.get("JUDGE0_AUTH_TOKEN")
     if token:
         headers["X-Auth-Token"] = token
