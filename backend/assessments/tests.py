@@ -75,6 +75,25 @@ class AssessmentFlowTests(TestCase):
         self.assertTrue(response.data["resumed"])
         self.assertEqual(response.data["candidate"]["id"], first["candidate"]["id"])
 
+    @patch.dict("assessments.views.os.environ", {"TEST_RETAKE_EMAILS": "luxmoreai@gmail.com"}, clear=False)
+    def test_reserved_test_email_can_restart_an_assessment(self):
+        candidate = Candidate.objects.create(
+            name="Luxmore Test", email="luxmoreai@gmail.com", phone="9876543210",
+            college="Luxmore", designation="Tester", address="Chennai",
+            role="mern-stack-developer", status="completed", hiring_status="assessment_completed",
+        )
+        attempt = candidate.attempts.create(round_type="aptitude", question_ids=[1], status="completed")
+        response = self.client.post("/api/candidates/register/", {
+            "name": "Luxmore Test", "email": candidate.email, "phone": candidate.phone,
+            "college": candidate.college, "designation": candidate.designation,
+            "address": candidate.address, "role": candidate.role, "preferred_location": "chennai",
+        }, format="json")
+        candidate.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["restarted"])
+        self.assertEqual(candidate.status, "registered")
+        self.assertFalse(Candidate.objects.get(id=candidate.id).attempts.exists())
+
     @override_settings(
         EMAIL_NOTIFICATIONS_ENABLED=True,
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",

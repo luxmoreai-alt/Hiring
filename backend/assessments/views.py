@@ -1,3 +1,4 @@
+import os
 import random
 from decimal import Decimal
 from django.contrib.auth import authenticate
@@ -23,6 +24,14 @@ def candidate_for(request):
 
 
 QUESTION_CACHE = {}
+
+
+def test_retake_emails():
+    return {
+        email.strip().lower()
+        for email in os.environ.get("TEST_RETAKE_EMAILS", "luxmoreai@gmail.com").split(",")
+        if email.strip()
+    }
 
 
 def cached_question(question_id):
@@ -171,6 +180,16 @@ def register(request):
     existing = Candidate.objects.filter(email=email).first()
     if existing:
         if existing.phone.strip().replace(" ", "") == request.data["phone"].strip().replace(" ", ""):
+            if email in test_retake_emails():
+                # Reserved test account: erase its prior attempts so it can run a fresh full assessment.
+                existing.attempts.all().delete()
+                existing.proctor_events.all().delete()
+                existing.status = "registered"
+                existing.completed_at = None
+                existing.hiring_status = "assessment_pending"
+                existing.hiring_status_updated_at = timezone.now()
+                existing.save(update_fields=["status", "completed_at", "hiring_status", "hiring_status_updated_at"])
+                return ApiResponse({"token": make_token(existing.id), "candidate": candidate_data(existing), "restarted": True})
             return ApiResponse({"token": make_token(existing.id), "candidate": candidate_data(existing), "resumed": True})
         return ApiResponse({"detail": "This email is already registered with a different phone number. Contact the recruiter for help."}, status=409)
     candidate = Candidate.objects.create(**{field: request.data[field].strip() for field in required if field != "email"}, email=email)
