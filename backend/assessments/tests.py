@@ -84,7 +84,7 @@ class AssessmentFlowTests(TestCase):
         )
         attempt = candidate.attempts.create(round_type="aptitude", question_ids=[1], status="completed")
         response = self.client.post("/api/candidates/register/", {
-            "name": "Luxmore Test", "email": candidate.email, "phone": candidate.phone,
+            "name": "Luxmore Test", "email": candidate.email, "phone": "+91 9884050511",
             "college": candidate.college, "designation": candidate.designation,
             "address": candidate.address, "role": candidate.role, "preferred_location": "chennai",
         }, format="json")
@@ -92,6 +92,7 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["restarted"])
         self.assertEqual(candidate.status, "registered")
+        self.assertEqual(candidate.phone, "+91 9884050511")
         self.assertFalse(Candidate.objects.get(id=candidate.id).attempts.exists())
 
     @override_settings(
