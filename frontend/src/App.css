@@ -1459,6 +1459,18 @@ td {
   height: 28px;
   margin-left: 7px;
 }
+.reset-btn {
+  border: 0;
+  background: #eef5ff;
+  color: #1769aa;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  margin-left: 7px;
+}
+.reset-btn svg {
+  width: 14px;
+}
 .delete-btn svg {
   width: 14px;
 }
@@ -1642,6 +1654,27 @@ td {
   font-size: 11px;
   color: var(--muted);
   margin-top: 3px;
+}
+.previous-assessment {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 10px;
+}
+.previous-assessment > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 7px;
+}
+.previous-assessment > div:first-child small {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+.access-lock-card .trophy {
+  background: #fff0f1;
+  color: var(--red);
 }
 .response-list > div {
   display: flex;

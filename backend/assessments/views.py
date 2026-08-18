@@ -2,6 +2,7 @@ import os
 import random
 from decimal import Decimal
 from django.contrib.auth import authenticate
+from django.db import transaction
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -11,7 +12,7 @@ from rest_framework import status
 
 from .auth import make_token, read_token
 from .emails import send_completion_email, send_registration_email
-from .models import Attempt, Candidate, CandidateStatusHistory, ProctorEvent, Question, Response
+from .models import AssessmentReset, Attempt, Candidate, CandidateStatusHistory, ProctorEvent, Question, Response
 from .runner import DEFAULT_STARTERS, available_languages, run_code
 
 ROUND_ORDER = ["aptitude", "technical", "coding"]
@@ -56,8 +57,9 @@ def candidate_data(candidate, detailed=False, include_results=False):
         "preferred_location": candidate.preferred_location, "preferred_location_label": candidate.get_preferred_location_display(),
         "status": candidate.status, "hiring_status": candidate.hiring_status,
         "hiring_status_label": candidate.get_hiring_status_display(), "registered_at": candidate.registered_at,
+        "access_locked": candidate.access_locked, "assessment_cycle": candidate.assessment_cycle,
     }
-    attempts = candidate.attempts.all()
+    attempts = candidate.attempts.filter(assessment_cycle=candidate.assessment_cycle)
     data["rounds"] = [{
         "round_type": a.round_type, "status": a.status,
         **({"score": float(a.score), "max_score": float(a.max_score), "passed_tests": a.passed_tests,
@@ -69,7 +71,18 @@ def candidate_data(candidate, detailed=False, include_results=False):
             "round": r.attempt.round_type, "question": r.question.prompt,
             "category": r.question.category, "correct": r.is_correct, "score": float(r.score),
             "passed_tests": r.passed_tests, "total_tests": r.total_tests, "timed_out": r.timed_out,
-        } for r in Response.objects.filter(attempt__candidate=candidate).select_related("attempt", "question")]
+        } for r in Response.objects.filter(attempt__candidate=candidate, attempt__assessment_cycle=candidate.assessment_cycle).select_related("attempt", "question")]
+        data["previous_assessments"] = [{
+            "assessment_cycle": reset.assessment_cycle, "status": reset.status_before_reset,
+            "reset_at": reset.created_at,
+            "reset_by": reset.reset_by.username if reset.reset_by else "System",
+            "rounds": [{
+                "round_type": attempt.round_type, "status": attempt.status,
+                "score": float(attempt.score), "max_score": float(attempt.max_score),
+                "passed_tests": attempt.passed_tests, "total_tests": attempt.total_tests,
+                "violations": attempt.violation_count,
+            } for attempt in candidate.attempts.filter(assessment_cycle=reset.assessment_cycle)],
+        } for reset in candidate.assessment_resets.select_related("reset_by").all()]
         data["status_history"] = [{
             "from_status": h.from_status, "to_status": h.to_status,
             "to_status_label": h.get_to_status_display(), "note": h.note,
@@ -208,10 +221,12 @@ def me(request):
 @api_view(["POST"])
 def start_round(request, round_type):
     candidate = candidate_for(request)
+    if candidate.access_locked:
+        return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
     if round_type not in ROUND_ORDER:
         return ApiResponse({"detail": "Unknown round"}, status=404)
     expected = "aptitude" if candidate.status == "registered" else candidate.status
-    existing = Attempt.objects.filter(candidate=candidate, round_type=round_type).first()
+    existing = Attempt.objects.filter(candidate=candidate, round_type=round_type, assessment_cycle=candidate.assessment_cycle).first()
     if existing:
         warm_questions(existing.question_ids)
         return ApiResponse(attempt_state(existing))
@@ -226,7 +241,7 @@ def start_round(request, round_type):
         return ApiResponse({"detail": f"Question bank is not ready: {len(ids)}/{needed} {round_type} questions available"}, status=503)
     random.shuffle(ids)
     warm_questions(ids[:needed])
-    attempt = Attempt.objects.create(candidate=candidate, round_type=round_type, question_ids=ids[:needed], question_started_at=timezone.now(), max_score=needed * (10 if round_type == "coding" else 1))
+    attempt = Attempt.objects.create(candidate=candidate, round_type=round_type, assessment_cycle=candidate.assessment_cycle, question_ids=ids[:needed], question_started_at=timezone.now(), max_score=needed * (10 if round_type == "coding" else 1))
     candidate.status = round_type
     candidate.save(update_fields=["status"])
     return ApiResponse(attempt_state(attempt), status=201)
@@ -234,16 +249,20 @@ def start_round(request, round_type):
 
 @api_view(["GET"])
 def round_state(request, round_type):
-    candidate_id = read_token(request)
-    attempt = get_object_or_404(Attempt, candidate_id=candidate_id, round_type=round_type)
+    candidate = candidate_for(request)
+    if candidate.access_locked:
+        return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
+    attempt = get_object_or_404(Attempt, candidate=candidate, round_type=round_type, assessment_cycle=candidate.assessment_cycle)
     warm_questions(attempt.question_ids)
     return ApiResponse(attempt_state(attempt))
 
 
 @api_view(["POST"])
 def submit_answer(request, round_type):
-    candidate_id = read_token(request)
-    attempt = get_object_or_404(Attempt, candidate_id=candidate_id, round_type=round_type, status="in_progress")
+    candidate = candidate_for(request)
+    if candidate.access_locked:
+        return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
+    attempt = get_object_or_404(Attempt, candidate=candidate, round_type=round_type, assessment_cycle=candidate.assessment_cycle, status="in_progress")
     question = cached_question(attempt.question_ids[attempt.current_index])
     if str(request.data.get("question_id")) != str(question.id):
         return ApiResponse({"detail": "Question has already advanced. Refresh the assessment."}, status=409)
@@ -280,8 +299,10 @@ def submit_answer(request, round_type):
 
 @api_view(["POST"])
 def try_code(request, round_type):
-    candidate_id = read_token(request)
-    attempt = get_object_or_404(Attempt, candidate_id=candidate_id, round_type=round_type, status="in_progress")
+    candidate = candidate_for(request)
+    if candidate.access_locked:
+        return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
+    attempt = get_object_or_404(Attempt, candidate=candidate, round_type=round_type, assessment_cycle=candidate.assessment_cycle, status="in_progress")
     question = cached_question(attempt.question_ids[attempt.current_index])
     if question.round_type != "coding": return ApiResponse({"detail": "Not a coding question"}, status=400)
     language = request.data.get("language", "python")
@@ -297,14 +318,26 @@ def try_code(request, round_type):
 
 @api_view(["POST"])
 def proctor_event(request):
-    candidate = candidate_for(request)
-    attempt = candidate.attempts.filter(status="in_progress").first()
     event_type = request.data.get("event_type", "unknown")[:40]
-    ProctorEvent.objects.create(candidate=candidate, attempt=attempt, event_type=event_type, details=request.data.get("details", {}))
-    if attempt and event_type in ("fullscreen_exit", "tab_hidden", "window_blur"):
-        attempt.violation_count += 1
-        attempt.save(update_fields=["violation_count"])
-    return ApiResponse({"logged": True, "violations": attempt.violation_count if attempt else 0})
+    with transaction.atomic():
+        candidate = Candidate.objects.select_for_update().get(id=read_token(request))
+        attempt = candidate.attempts.filter(
+            assessment_cycle=candidate.assessment_cycle, status="in_progress"
+        ).first()
+        ProctorEvent.objects.create(candidate=candidate, attempt=attempt, event_type=event_type, details=request.data.get("details", {}))
+        if attempt and event_type in ("fullscreen_exit", "tab_hidden", "window_blur", "page_exit"):
+            attempt.violation_count += 1
+            attempt.status = "terminated"
+            attempt.completed_at = timezone.now()
+            attempt.question_started_at = None
+            attempt.save(update_fields=["violation_count", "status", "completed_at", "question_started_at"])
+            candidate.access_locked = True
+            candidate.save(update_fields=["access_locked"])
+    return ApiResponse({
+        "logged": True,
+        "violations": attempt.violation_count if attempt else 0,
+        "access_locked": candidate.access_locked,
+    })
 
 
 @api_view(["POST"])
@@ -349,6 +382,33 @@ def admin_candidate_delete(request, candidate_id):
     candidate = get_object_or_404(Candidate, id=candidate_id)
     candidate.delete()
     return ApiResponse({"deleted": True})
+
+
+@api_view(["POST"])
+def admin_candidate_reset(request, candidate_id):
+    admin_user = require_admin(request)
+    with transaction.atomic():
+        candidate = get_object_or_404(Candidate.objects.select_for_update(), id=candidate_id)
+        AssessmentReset.objects.create(
+            candidate=candidate,
+            assessment_cycle=candidate.assessment_cycle,
+            status_before_reset=candidate.status,
+            reset_by=admin_user,
+        )
+        candidate.assessment_cycle += 1
+        candidate.status = "registered"
+        candidate.access_locked = False
+        candidate.completed_at = None
+        candidate.hiring_status = "assessment_pending"
+        candidate.hiring_status_updated_at = timezone.now()
+        candidate.save(update_fields=[
+            "assessment_cycle", "status", "access_locked", "completed_at",
+            "hiring_status", "hiring_status_updated_at",
+        ])
+    return ApiResponse({
+        "reset": True,
+        "candidate": candidate_data(candidate, detailed=True, include_results=True),
+    })
 
 
 @api_view(["PATCH"])

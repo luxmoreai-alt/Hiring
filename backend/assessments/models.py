@@ -39,6 +39,8 @@ class Candidate(models.Model):
     hiring_status_updated_at = models.DateTimeField(null=True, blank=True)
     registered_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    assessment_cycle = models.PositiveIntegerField(default=1)
+    access_locked = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.name} — {self.get_role_display()}"
@@ -64,7 +66,7 @@ class Question(models.Model):
 
 
 class Attempt(models.Model):
-    STATUS_CHOICES = [("in_progress", "In progress"), ("completed", "Completed"), ("auto_submitted", "Auto submitted")]
+    STATUS_CHOICES = [("in_progress", "In progress"), ("completed", "Completed"), ("auto_submitted", "Auto submitted"), ("terminated", "Terminated after exit")]
     candidate = models.ForeignKey(Candidate, related_name="attempts", on_delete=models.CASCADE)
     round_type = models.CharField(max_length=20, choices=Question.ROUND_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="in_progress")
@@ -78,10 +80,11 @@ class Attempt(models.Model):
     passed_tests = models.PositiveIntegerField(default=0)
     total_tests = models.PositiveIntegerField(default=0)
     violation_count = models.PositiveIntegerField(default=0)
+    assessment_cycle = models.PositiveIntegerField(default=1)
 
     class Meta:
         ordering = ["started_at"]
-        constraints = [models.UniqueConstraint(fields=["candidate", "round_type"], name="unique_candidate_round")]
+        constraints = [models.UniqueConstraint(fields=["candidate", "round_type", "assessment_cycle"], name="unique_candidate_round_cycle")]
 
 
 class Response(models.Model):
@@ -115,6 +118,17 @@ class CandidateStatusHistory(models.Model):
     to_status = models.CharField(max_length=30, choices=Candidate.HIRING_STATUS_CHOICES)
     note = models.TextField(blank=True)
     changed_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class AssessmentReset(models.Model):
+    candidate = models.ForeignKey(Candidate, related_name="assessment_resets", on_delete=models.CASCADE)
+    assessment_cycle = models.PositiveIntegerField()
+    status_before_reset = models.CharField(max_length=20)
+    reset_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

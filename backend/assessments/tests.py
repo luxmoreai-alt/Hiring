@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from .auth import make_token
 from .emails import send_completion_email, send_registration_email
-from .models import Candidate, CandidateStatusHistory, Question
+from .models import AssessmentReset, Candidate, CandidateStatusHistory, Question
 from .runner import _judge0_languages_cache, available_languages, run_code
 from .views import evaluate_react_solution, public_question
 
@@ -181,3 +181,38 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["deleted"])
         self.assertFalse(Candidate.objects.filter(id=candidate.id).exists())
+
+    def test_leaving_exam_terminates_and_locks_access(self):
+        self.register_candidate()
+        started = self.client.post("/api/rounds/aptitude/start/", {}, format="json")
+        exited = self.client.post("/api/proctor/events/", {
+            "event_type": "fullscreen_exit", "details": {"path": "/assessment/aptitude"},
+        }, format="json")
+        self.assertEqual(exited.status_code, 200)
+        self.assertTrue(exited.data["access_locked"])
+        candidate = Candidate.objects.get(email="student@example.com")
+        self.assertTrue(candidate.access_locked)
+        self.assertEqual(candidate.attempts.get(id=started.data["id"]).status, "terminated")
+        state = self.client.get("/api/rounds/aptitude/state/")
+        self.assertEqual(state.status_code, 423)
+
+    def test_staff_reset_preserves_previous_attempt_and_allows_retake(self):
+        registration = self.register_candidate()
+        started = self.client.post("/api/rounds/aptitude/start/", {}, format="json")
+        candidate = Candidate.objects.get(id=registration["candidate"]["id"])
+        old_attempt_id = started.data["id"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
+        reset = self.client.post(f"/api/staff/candidates/{candidate.id}/reset/", {}, format="json")
+        self.assertEqual(reset.status_code, 200)
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.status, "registered")
+        self.assertEqual(candidate.assessment_cycle, 2)
+        self.assertFalse(candidate.access_locked)
+        self.assertTrue(candidate.attempts.filter(id=old_attempt_id, assessment_cycle=1).exists())
+        self.assertTrue(AssessmentReset.objects.filter(candidate=candidate, assessment_cycle=1).exists())
+        self.assertEqual(reset.data["candidate"]["previous_assessments"][0]["rounds"][0]["round_type"], "aptitude")
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(candidate.id)}")
+        restarted = self.client.post("/api/rounds/aptitude/start/", {}, format="json")
+        self.assertEqual(restarted.status_code, 201)
+        self.assertNotEqual(restarted.data["id"], old_attempt_id)

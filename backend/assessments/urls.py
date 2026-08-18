@@ -14,5 +14,6 @@ urlpatterns = [
     path("staff/dashboard/", views.admin_dashboard),
     path("staff/candidates/<uuid:candidate_id>/", views.admin_candidate),
     path("staff/candidates/<uuid:candidate_id>/delete/", views.admin_candidate_delete),
+    path("staff/candidates/<uuid:candidate_id>/reset/", views.admin_candidate_reset),
     path("staff/candidates/<uuid:candidate_id>/status/", views.admin_candidate_status),
 ]

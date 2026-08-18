@@ -21,6 +21,7 @@ import {
   LogOut,
   Maximize2,
   Play,
+  RotateCcw,
   Search,
   ShieldCheck,
   Trash2,
@@ -487,7 +488,17 @@ function Portal() {
             <b>{candidate.id.slice(0, 8).toUpperCase()}</b>
           </div>
         </section>
-        {candidate.status === "completed" ? (
+        {candidate.access_locked ? (
+          <section className="completion access-lock-card">
+            <div className="trophy"><LockKeyhole /></div>
+            <span className="eyebrow"><span /> Access locked</span>
+            <h2>This assessment session has ended.</h2>
+            <p>
+              Leaving fullscreen or switching away from the exam ends the session.
+              Contact the recruitment administrator if you need another attempt.
+            </p>
+          </section>
+        ) : candidate.status === "completed" ? (
           <Completion candidate={candidate} />
         ) : (
           <>
@@ -638,8 +649,8 @@ function Instructions() {
             <span>
               <b>Fullscreen is mandatory</b>
               <small>
-                Leaving fullscreen or changing tabs is recorded as a proctoring
-                violation.
+                Leaving fullscreen or changing tabs ends your assessment and
+                requires an administrator reset.
               </small>
             </span>
           </div>
@@ -723,7 +734,11 @@ function Assessment() {
         }),
       })
         .then((data) =>
-          setState((s) => (s ? { ...s, violations: data.violations } : s)),
+          setState((s) => (s ? {
+            ...s,
+            violations: data.violations,
+            access_locked: data.access_locked,
+          } : s)),
         )
         .catch(() => {}),
     [],
@@ -732,16 +747,37 @@ function Assessment() {
     const fs = () => {
       const exited = !document.fullscreenElement;
       setBlocked(exited);
-      if (exited) logEvent("fullscreen_exit");
+      if (exited) {
+        setState((current) => current ? { ...current, access_locked: true } : current);
+        logEvent("fullscreen_exit");
+      }
     };
     const visibility = () => {
       if (document.hidden) logEvent("tab_hidden");
     };
+    const pageExit = () => {
+      const token = localStorage.getItem("candidateToken");
+      if (!token) return;
+      fetch(`${API}/proctor/events/`, {
+        method: "POST",
+        keepalive: true,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          event_type: "page_exit",
+          details: { path: location.pathname },
+        }),
+      }).catch(() => {});
+    };
     document.addEventListener("fullscreenchange", fs);
     document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("pagehide", pageExit);
     return () => {
       document.removeEventListener("fullscreenchange", fs);
       document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("pagehide", pageExit);
     };
   }, [logEvent]);
   const submit = useCallback(async () => {
@@ -853,6 +889,7 @@ function Assessment() {
       setBusy(false);
     }
   };
+  if (!state && error) return <Navigate to="/portal" replace />;
   if (!state) return <Loader />;
   if (state.status !== "in_progress") return <Navigate to="/portal" />;
   const q = state.question;
@@ -1043,20 +1080,16 @@ function Assessment() {
       {blocked && (
         <div className="fullscreen-block">
           <div>
-            <Maximize2 />
-            <h2>Return to fullscreen</h2>
-            <p>
-              Your assessment is paused visually, but the question timer
-              continues. This exit has been recorded.
-            </p>
-            <button
-              className="primary"
-              onClick={() =>
-                document.documentElement.requestFullscreen().catch(() => {})
-              }
-            >
-              <Maximize2 size={17} /> Resume in fullscreen
-            </button>
+            {state.access_locked ? <LockKeyhole /> : <Maximize2 />}
+            <h2>{state.access_locked ? "Assessment access locked" : "Verifying exam session"}</h2>
+            <p>{state.access_locked
+              ? "You left the protected exam screen. This attempt has ended and cannot be resumed until an administrator resets your access."
+              : "Please wait while the portal verifies this fullscreen exit."}</p>
+            {state.access_locked && (
+              <button className="primary" onClick={() => navigate("/portal")}>
+                Return to assessment centre
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1235,6 +1268,27 @@ function AdminDashboard() {
         setSelected(null);
         setDetail(null);
       }
+    } catch (error) {
+      window.alert(error.message);
+    }
+  };
+  const resetCandidate = async (candidate) => {
+    if (!window.confirm(`Reset assessment access for ${candidate.name}? Their current results will be kept in previous assessment history, and they can start again with the same email and phone number.`)) return;
+    try {
+      const payload = await request(
+        `/staff/candidates/${candidate.id}/reset/`,
+        { method: "POST" },
+        true,
+      );
+      const reset = { ...candidate, ...payload.candidate, percentage: 0 };
+      setData((current) => ({
+        ...current,
+        candidates: current.candidates.map((item) =>
+          item.id === candidate.id ? reset : item,
+        ),
+      }));
+      setSelected((current) => current?.id === candidate.id ? reset : current);
+      setDetail(payload.candidate);
     } catch (error) {
       window.alert(error.message);
     }
@@ -1687,6 +1741,14 @@ function AdminDashboard() {
                           <Eye />
                         </button>
                         <button
+                          className="reset-btn"
+                          aria-label={`Reset assessment for ${c.name}`}
+                          title="Reset assessment access"
+                          onClick={() => resetCandidate(c)}
+                        >
+                          <RotateCcw />
+                        </button>
+                        <button
                           className="delete-btn"
                           aria-label={`Delete ${c.name}`}
                           title="Delete candidate"
@@ -1815,6 +1877,9 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
           </button>
         </div>
         <h3>Round performance</h3>
+        {!candidate.rounds.length && (
+          <div className="drawer-loading">No rounds started in the current assessment.</div>
+        )}
         {candidate.rounds.map((r) => (
           <div className="round-result" key={r.round_type}>
             <span>
@@ -1829,6 +1894,30 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             </b>
           </div>
         ))}
+        {detail?.previous_assessments?.length > 0 && (
+          <>
+            <h3>Previous assessments</h3>
+            {detail.previous_assessments.map((assessment) => (
+              <div className="previous-assessment" key={assessment.assessment_cycle}>
+                <div>
+                  <b>Attempt {assessment.assessment_cycle}</b>
+                  <small>
+                    Status: {assessment.status} · reset {new Date(assessment.reset_at).toLocaleString()} by {assessment.reset_by}
+                  </small>
+                </div>
+                {assessment.rounds.map((round) => (
+                  <div className="round-result" key={round.round_type}>
+                    <span>
+                      {roundMeta[round.round_type]?.title}
+                      <small>{round.status} · {round.violations} violations</small>
+                    </span>
+                    <b>{round.score}/{round.max_score}</b>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </>
+        )}
         <h3>Response audit</h3>
         {!detail ? (
           <div className="drawer-loading">Loading response details…</div>
