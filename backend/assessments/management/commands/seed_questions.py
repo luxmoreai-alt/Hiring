@@ -170,4 +170,5 @@ class Command(BaseCommand):
                     test_cases=tests, visible_test_count=min(2, len(tests)),
                 )
         call_command("seed_specialized_roles")
+        call_command("seed_hard_questions")
         self.stdout.write(self.style.SUCCESS(f"Seeded {Question.objects.count()} questions"))

@@ -97,7 +97,9 @@ if os.getenv("DATABASE_URL") and os.getenv("USE_SQLITE", "false").lower() != "tr
         "HOST": database_url.hostname,
         "PORT": database_url.port or 5432,
         "OPTIONS": {"sslmode": query.get("sslmode", ["require"])[0]},
-        "CONN_MAX_AGE": 300,
+        # Serverless workers must release connections promptly; long-lived local
+        # workers may opt in to reuse through DB_CONN_MAX_AGE.
+        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "0" if VERCEL_HOST else "60")),
     }}
 else:
     DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}}

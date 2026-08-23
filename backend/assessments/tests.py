@@ -1,13 +1,16 @@
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 from unittest.mock import patch
 
 from .auth import make_token
 from .emails import send_completion_email, send_registration_email
-from .models import AssessmentReset, Candidate, CandidateStatusHistory, Question
+from .models import AssessmentReset, Candidate, CandidateStatusHistory, ProctorRecording, Question
 from .runner import _judge0_languages_cache, available_languages, run_code
 from .views import evaluate_react_solution, public_question
 
@@ -22,22 +25,24 @@ class AssessmentFlowTests(TestCase):
         self.client = APIClient()
 
     def register_candidate(self):
+        resume = SimpleUploadedFile("Original Resume.pdf", b"%PDF-1.4 test resume", content_type="application/pdf")
         response = self.client.post("/api/candidates/register/", {
             "name": "Test Student", "email": "student@example.com", "phone": "9876543210",
             "college": "Example Institute", "designation": "B.Tech CSE",
-            "address": "Hyderabad", "role": "mern-stack-developer", "preferred_location": "hyderabad",
-        }, format="json")
+            "address": "12 Example Road, Hyderabad 500001", "address_confirmed": "true",
+            "role": "mern-stack-developer", "preferred_location": "hyderabad", "resume": resume,
+        }, format="multipart")
         self.assertEqual(response.status_code, 201)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['token']}")
         return response.data
 
     def test_question_bank_has_required_counts(self):
-        self.assertEqual(Question.objects.filter(round_type="aptitude").count(), 60)
-        self.assertEqual(Question.objects.filter(round_type="technical", role="mern-stack-developer").count(), 20)
-        self.assertEqual(Question.objects.filter(round_type="coding", role="mern-stack-developer").count(), 2)
+        self.assertGreater(Question.objects.filter(round_type="aptitude").count(), 60)
+        self.assertGreater(Question.objects.filter(round_type="technical", role="mern-stack-developer").count(), 20)
+        self.assertGreater(Question.objects.filter(round_type="coding", role="mern-stack-developer").count(), 2)
         for role in ("frontend-developer", "backend-developer", "full-stack-developer"):
-            self.assertEqual(Question.objects.filter(round_type="technical", role=role).count(), 20)
-            self.assertEqual(Question.objects.filter(round_type="coding", role=role).count(), 2)
+            self.assertGreater(Question.objects.filter(round_type="technical", role=role).count(), 20)
+            self.assertGreater(Question.objects.filter(round_type="coding", role=role).count(), 2)
         frontend = Question.objects.filter(round_type="coding", role="frontend-developer").first()
         self.assertEqual(public_question(frontend)["workspace"], "react")
         self.assertEqual(public_question(frontend)["languages"], [{"value": "react", "label": "React (JSX)"}])
@@ -63,17 +68,74 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(answered.data["state"]["score"], 1)
         self.assertEqual(answered.data["state"]["current"], 1)
 
+    def test_duplicate_answer_returns_current_state_without_error(self):
+        registration = self.register_candidate()
+        started = self.client.post("/api/rounds/aptitude/start/", {}, format="json")
+        question = Question.objects.get(id=started.data["question"]["id"])
+        payload = {"question_id": question.id, "selected_option": question.correct_option}
+        first = self.client.post("/api/rounds/aptitude/answer/", payload, format="json")
+        duplicate = self.client.post("/api/rounds/aptitude/answer/", payload, format="json")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertTrue(duplicate.data["duplicate"])
+        self.assertEqual(duplicate.data["state"]["current"], 1)
+        candidate = Candidate.objects.get(id=registration["candidate"]["id"])
+        self.assertEqual(candidate.attempts.get(round_type="aptitude").responses.count(), 1)
+
+    def test_stale_coding_requests_return_conflict_instead_of_not_found(self):
+        self.register_candidate()
+        state = self.client.get("/api/rounds/coding/state/")
+        run = self.client.post("/api/rounds/coding/run/", {
+            "code": "print('test')", "language": "python",
+        }, format="json")
+        answer = self.client.post("/api/rounds/coding/answer/", {
+            "question_id": 1, "code": "print('test')", "language": "python",
+        }, format="json")
+        self.assertEqual(state.status_code, 409)
+        self.assertEqual(run.status_code, 409)
+        self.assertEqual(answer.status_code, 409)
+
     def test_matching_email_and_phone_resumes_registration(self):
         first = self.register_candidate()
         self.client.credentials()
         response = self.client.post("/api/candidates/register/", {
             "name": "Test Student", "email": "student@example.com", "phone": "9876543210",
             "college": "Example Institute", "designation": "B.Tech CSE",
-            "address": "Hyderabad", "role": "mern-stack-developer", "preferred_location": "hyderabad",
+            "address": "12 Example Road, Hyderabad 500001", "address_confirmed": True,
+            "role": "mern-stack-developer", "preferred_location": "hyderabad",
         }, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["resumed"])
         self.assertEqual(response.data["candidate"]["id"], first["candidate"]["id"])
+
+    def test_registration_rejects_images_and_oversized_resumes(self):
+        base = {
+            "name": "Resume Test", "email": "resume@example.com", "phone": "9876543210",
+            "college": "Example College", "designation": "B.Tech",
+            "address": "1 College Road, Chennai 600001", "address_confirmed": "true",
+            "role": "data-analyst", "preferred_location": "chennai",
+        }
+        image = self.client.post("/api/candidates/register/", {
+            **base, "resume": SimpleUploadedFile("photo.png", b"\x89PNG test", content_type="image/png"),
+        }, format="multipart")
+        self.assertEqual(image.status_code, 400)
+        huge = self.client.post("/api/candidates/register/", {
+            **base, "resume": SimpleUploadedFile("resume.pdf", b"%PDF-" + b"x" * (3 * 1024 * 1024), content_type="application/pdf"),
+        }, format="multipart")
+        self.assertEqual(huge.status_code, 400)
+
+    def test_admin_downloads_resume_with_original_filename(self):
+        registered = self.register_candidate()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
+        response = self.client.get(f"/api/staff/candidates/{registered['candidate']['id']}/resume/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Original%20Resume.pdf", response["Content-Disposition"])
+        self.assertEqual(response.content, b"%PDF-1.4 test resume")
+
+    def test_college_names_are_normalized_for_filtering(self):
+        first = Candidate.objects.create(name="A", email="college-a@example.com", phone="9999999999", college="Example   INSTITUTE", designation="B", address="X", role="data-analyst")
+        second = Candidate.objects.create(name="B", email="college-b@example.com", phone="8888888888", college=" example institute ", designation="B", address="X", role="data-analyst")
+        self.assertEqual(first.college_normalized, second.college_normalized)
 
     @patch.dict("assessments.views.os.environ", {"TEST_RETAKE_EMAILS": "luxmoreai@gmail.com"}, clear=False)
     def test_reserved_test_email_can_restart_an_assessment(self):
@@ -84,15 +146,16 @@ class AssessmentFlowTests(TestCase):
         )
         attempt = candidate.attempts.create(round_type="aptitude", question_ids=[1], status="completed")
         response = self.client.post("/api/candidates/register/", {
-            "name": "Luxmore Test", "email": candidate.email, "phone": "+91 9884050511",
+            "name": "Luxmore Test", "email": candidate.email, "phone": "9884050511",
             "college": candidate.college, "designation": candidate.designation,
-            "address": candidate.address, "role": candidate.role, "preferred_location": "chennai",
+            "address": "12 Test Road, Chennai 600001", "address_confirmed": True,
+            "role": candidate.role, "preferred_location": "chennai",
         }, format="json")
         candidate.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["restarted"])
         self.assertEqual(candidate.status, "registered")
-        self.assertEqual(candidate.phone, "+91 9884050511")
+        self.assertEqual(candidate.phone, "9884050511")
         self.assertFalse(Candidate.objects.get(id=candidate.id).attempts.exists())
 
     @override_settings(
@@ -163,6 +226,20 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(response.data["summary"]["registered"], 1)
         self.assertEqual(response.data["candidates"][0]["id"], str(candidate.id))
 
+    def test_staff_dashboard_handles_200_candidates_without_n_plus_one_queries(self):
+        Candidate.objects.bulk_create([
+            Candidate(name=f"Candidate {index}", email=f"candidate-{index}@example.com",
+                      phone=f"9{index:09d}", college="Load Test College", designation="B.Tech",
+                      address="Load Test Address", role="data-analyst")
+            for index in range(200)
+        ])
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/staff/dashboard/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["candidates"]), 200)
+        self.assertLessEqual(len(queries), 5)
+
     def test_staff_can_update_recruitment_status(self):
         candidate = Candidate.objects.create(name="Interview Candidate", email="interview@example.com", phone="99999999", college="C", designation="B.Tech", address="X", role="data-analyst", preferred_location="chennai")
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
@@ -182,6 +259,14 @@ class AssessmentFlowTests(TestCase):
         self.assertTrue(response.data["deleted"])
         self.assertFalse(Candidate.objects.filter(id=candidate.id).exists())
 
+    def test_staff_can_bulk_delete_only_selected_candidates(self):
+        Candidate.objects.create(name="Selected", email="selected@example.com", phone="9999999999", college="C", designation="B", address="X", role="data-analyst", hiring_status="selected")
+        kept = Candidate.objects.create(name="Pending", email="pending@example.com", phone="8888888888", college="C", designation="B", address="X", role="data-analyst")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
+        response = self.client.delete("/api/staff/selected/delete-all/")
+        self.assertEqual(response.data["deleted"], 1)
+        self.assertTrue(Candidate.objects.filter(id=kept.id).exists())
+
     def test_leaving_exam_terminates_and_locks_access(self):
         self.register_candidate()
         started = self.client.post("/api/rounds/aptitude/start/", {}, format="json")
@@ -195,6 +280,27 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(candidate.attempts.get(id=started.data["id"]).status, "terminated")
         state = self.client.get("/api/rounds/aptitude/state/")
         self.assertEqual(state.status_code, 423)
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.hiring_status, "rejected")
+        self.assertIn("fullscreen", candidate.ai_rejection_reason)
+
+    def test_proctor_recording_is_uploaded_in_admin_playback_chunks(self):
+        self.register_candidate()
+        self.client.post("/api/rounds/aptitude/start/", {}, format="json")
+        started = self.client.post("/api/proctor/recordings/start/", {"mime_type": "video/webm"}, format="json")
+        self.assertEqual(started.status_code, 201)
+        chunk = self.client.post(
+            f"/api/proctor/recordings/{started.data['id']}/chunks/?sequence=0",
+            b"webm-segment", content_type="application/octet-stream",
+        )
+        self.assertEqual(chunk.status_code, 200)
+        recording = ProctorRecording.objects.get(id=started.data["id"])
+        self.assertEqual(recording.chunk_count, 1)
+        self.assertEqual(recording.total_size, len(b"webm-segment"))
+        self.client.post(f"/api/proctor/recordings/{started.data['id']}/finish/", {}, format="json")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
+        playback = self.client.get(f"/api/staff/recordings/{started.data['id']}/?sequence=0")
+        self.assertEqual(playback.content, b"webm-segment")
 
     def test_staff_reset_preserves_previous_attempt_and_allows_retake(self):
         registration = self.register_candidate()

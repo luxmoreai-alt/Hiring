@@ -30,6 +30,7 @@ class Candidate(models.Model):
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=20)
     college = models.CharField(max_length=200)
+    college_normalized = models.CharField(max_length=200, blank=True, db_index=True)
     designation = models.CharField(max_length=120, help_text="Degree, department, or current designation")
     address = models.TextField()
     role = models.CharField(max_length=40, choices=ROLE_CHOICES)
@@ -41,6 +42,17 @@ class Candidate(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     assessment_cycle = models.PositiveIntegerField(default=1)
     access_locked = models.BooleanField(default=False)
+    resume_name = models.CharField(max_length=255, blank=True)
+    resume_content_type = models.CharField(max_length=100, blank=True)
+    resume_size = models.PositiveIntegerField(default=0)
+    resume_data = models.BinaryField(null=True, blank=True)
+    ai_rejection_reason = models.TextField(blank=True)
+    ai_rejected_at = models.DateTimeField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        self.college = " ".join((self.college or "").split())
+        self.college_normalized = self.college.casefold()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.name} — {self.get_role_display()}"
@@ -133,3 +145,26 @@ class AssessmentReset(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class ProctorRecording(models.Model):
+    candidate = models.ForeignKey(Candidate, related_name="proctor_recordings", on_delete=models.CASCADE)
+    attempt = models.ForeignKey(Attempt, related_name="recordings", on_delete=models.CASCADE)
+    mime_type = models.CharField(max_length=100, default="video/webm")
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    total_size = models.PositiveBigIntegerField(default=0)
+    chunk_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["started_at"]
+
+
+class ProctorRecordingChunk(models.Model):
+    recording = models.ForeignKey(ProctorRecording, related_name="chunks", on_delete=models.CASCADE)
+    sequence = models.PositiveIntegerField()
+    data = models.BinaryField()
+
+    class Meta:
+        ordering = ["sequence"]
+        constraints = [models.UniqueConstraint(fields=["recording", "sequence"], name="unique_recording_chunk")]

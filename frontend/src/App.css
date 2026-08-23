@@ -598,7 +598,7 @@ textarea:focus {
   padding: 30px;
 }
 .instruction-card {
-  width: min(620px, 100%);
+  width: min(760px, 100%);
   background: #fff;
   border: 1px solid var(--line);
   box-shadow: 0 25px 80px #28203f19;
@@ -1450,6 +1450,51 @@ td {
 .view-btn svg {
   width: 14px;
 }
+.device-check {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 16px;
+  align-items: center;
+  text-align: left;
+  padding: 14px;
+  margin: 0 0 14px;
+  border: 1px solid #e3dff2;
+  border-radius: 12px;
+  background: #faf9ff;
+}
+.device-check.ready { border-color: #9bd6bd; background: #f0fbf6; }
+.device-check video { width: 150px; height: 100px; border-radius: 9px; object-fit: cover; transform: scaleX(-1); background: #1b1827; }
+.device-check > div { display: flex; flex-direction: column; gap: 6px; }
+.device-check small { color: var(--muted); line-height: 1.45; }
+.device-check button { align-self: flex-start; margin-top: 4px; }
+.device-check button svg { width: 16px; }
+.rule-consent { display: flex; align-items: flex-start; gap: 10px; padding: 13px; margin-bottom: 14px; text-align: left; border-radius: 10px; background: #fff7e5; color: #654b12; font-size: 12px; line-height: 1.5; }
+.rule-consent input { width: 17px; height: 17px; margin-top: 1px; flex: none; }
+
+/* Proctoring and recruiter file controls */
+.proctor-live { position: relative; width: 74px; height: 48px; overflow: hidden; border-radius: 8px; background: #15131f; }
+.proctor-live video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+.proctor-live span { position: absolute; right: 4px; bottom: 3px; padding: 2px 4px; border-radius: 4px; background: #111a; color: #fff; font-size: 8px; font-weight: 800; }
+.proctor-live i { display: inline-block; width: 5px; height: 5px; margin-right: 3px; border-radius: 50%; background: #f04455; }
+.danger-action { border: 0; background: #fff0f1; color: #b42335; border-radius: 7px; padding: 8px 11px; display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; }
+.danger-action svg { width: 14px; }
+.file-btn { border: 0; background: #eef5ff; color: #1769aa; border-radius: 6px; padding: 6px 8px; max-width: 170px; display: inline-flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.file-btn svg { width: 13px; flex: none; }
+.muted { color: var(--muted); font-size: 10px; }
+.candidate-files { margin: 15px 0; }
+.candidate-files button { width: 100%; justify-content: center; }
+.candidate-files svg { width: 16px; }
+.ai-rejection { display: flex; gap: 10px; padding: 13px; margin: 12px 0; border-radius: 9px; color: #9f2637; background: #fff0f1; }
+.ai-rejection svg { width: 19px; flex: none; }
+.ai-rejection span { display: flex; flex-direction: column; gap: 3px; }
+.ai-rejection small { line-height: 1.4; }
+.recording-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+.recording-list > div { border: 1px solid var(--line); border-radius: 9px; padding: 10px; }
+.recording-list span { display: grid; grid-template-columns: 24px 1fr; align-items: center; }
+.recording-list span svg { grid-row: 1 / 3; width: 17px; color: var(--purple); }
+.recording-list span small { color: var(--muted); }
+.recording-list button { margin-top: 9px; }
+.recording-list video { display: block; width: 100%; margin-top: 9px; border-radius: 7px; background: #111; }
 .delete-btn {
   border: 0;
   background: #fff0f1;
@@ -1868,6 +1913,8 @@ td {
   .instruction-card {
     padding: 28px 20px;
   }
+  .device-check { grid-template-columns: 1fr; }
+  .device-check video { width: 100%; height: 170px; }
   .question-shell {
     padding: 18px;
   }

@@ -14,6 +14,8 @@ import {
   ChevronLeft,
   Clock3,
   Code2,
+  Camera,
+  Download,
   Eye,
   EyeOff,
   LayoutDashboard,
@@ -28,6 +30,7 @@ import {
   Trophy,
   UserRound,
   UsersRound,
+  Video,
   X,
 } from "lucide-react";
 import {
@@ -44,6 +47,7 @@ import luxmorLogo from "./assets/WhatsA mail.jpeg";
 import "./App.css";
 
 const API = import.meta.env.VITE_API_URL || "/api";
+let activeProctorStream = null;
 const roles = [
   ["data-analyst", "Data Analyst", "SQL, statistics & insights"],
   ["frontend-developer", "Frontend Developer", "React, JavaScript, HTML & CSS"],
@@ -130,15 +134,42 @@ async function request(path, options = {}, admin = false) {
   const response = await fetch(`${API}${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(data.detail || "Something went wrong. Please try again.");
+  if (!response.ok) {
+    const error = new Error(data.detail || "Something went wrong. Please try again.");
+    error.status = response.status;
+    throw error;
+  }
   return data;
+}
+
+async function adminBlob(path) {
+  const response = await fetch(`${API}${path}`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem("adminToken")}` },
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || "The file could not be loaded.");
+  }
+  return { blob: await response.blob(), disposition: response.headers.get("Content-Disposition") || "" };
+}
+
+async function downloadResume(candidate) {
+  const { blob, disposition } = await adminBlob(`/staff/candidates/${candidate.id}/resume/`);
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const fallback = disposition.match(/filename="([^"]+)"/i)?.[1] || candidate.resume?.name || "resume";
+  const name = encoded ? decodeURIComponent(encoded) : fallback;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function Brand({ light = false }) {
@@ -167,6 +198,7 @@ function Landing() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [roleText, setRoleText] = useState("");
+  const [resume, setResume] = useState(null);
   const set = (key) => (event) =>
     setForm({ ...form, [key]: event.target.value });
   const submit = async (event) => {
@@ -177,12 +209,24 @@ function Landing() {
       );
       return;
     }
+    if (!/^\d{10}$/.test(form.phone)) {
+      setError("Phone number must contain exactly 10 digits.");
+      return;
+    }
+    if (!resume) {
+      setError("Upload your resume in PDF, Word, or OpenDocument format.");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
+      const body = new FormData();
+      Object.entries(form).forEach(([key, value]) => body.append(key, value));
+      body.append("address_confirmed", "true");
+      body.append("resume", resume, resume.name);
       const data = await request("/candidates/register/", {
         method: "POST",
-        body: JSON.stringify(form),
+        body,
       });
       localStorage.setItem("candidateToken", data.token);
       navigate("/portal");
@@ -273,9 +317,12 @@ function Landing() {
                 <input
                   required
                   value={form.phone}
-                  onChange={set("phone")}
-                  pattern="[0-9+ -]{8,20}"
-                  placeholder="+91 98765 43210"
+                  onChange={(event) => setForm({ ...form, phone: event.target.value.replace(/\D/g, "").slice(0, 10) })}
+                  pattern="[0-9]{10}"
+                  inputMode="numeric"
+                  minLength="10"
+                  maxLength="10"
+                  placeholder="9876543210"
                 />
               </label>
             </div>
@@ -307,11 +354,33 @@ function Landing() {
                 value={form.address}
                 onChange={set("address")}
                 placeholder="Enter your full permanent address as shown on Aadhaar"
+                minLength="20"
+                pattern=".*[1-9][0-9]{5}.*"
               />
               <small className="field-help">
                 Please enter your full permanent address exactly as on your
                 Aadhaar. It will be used for office-letter processing.
               </small>
+            </label>
+            <label>
+              Resume (maximum 3 MB)
+              <input
+                required
+                type="file"
+                accept=".pdf,.doc,.docx,.odt,.odf,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.oasis.opendocument.text"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  if (file && file.size > 3 * 1024 * 1024) {
+                    event.target.value = "";
+                    setResume(null);
+                    setError("Resume must be 3 MB or smaller.");
+                  } else {
+                    setResume(file);
+                    setError("");
+                  }
+                }}
+              />
+              <small className="field-help">PDF, DOC, DOCX, ODT, or ODF only. Images are rejected.</small>
             </label>
             <div className="field-row">
               <label>
@@ -602,16 +671,67 @@ function Instructions() {
   const navigate = useNavigate();
   const meta = roundMeta[type];
   const [loading, setLoading] = useState(false);
+  const [permissionLoading, setPermissionLoading] = useState(false);
+  const [devicesReady, setDevicesReady] = useState(false);
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState("");
+  const previewRef = useRef(null);
+  const handoffRef = useRef(false);
+  useEffect(() => () => {
+    if (!handoffRef.current) {
+      activeProctorStream?.getTracks().forEach((track) => track.stop());
+      activeProctorStream = null;
+    }
+  }, []);
   if (!meta) return <Navigate to="/portal" />;
+  const checkDevices = async () => {
+    setPermissionLoading(true);
+    setError("");
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("This browser does not support camera and microphone access. Use a current Chrome, Edge, or Firefox browser.");
+      }
+      activeProctorStream?.getTracks().forEach((track) => track.stop());
+      activeProctorStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 320 }, height: { ideal: 240 } },
+        audio: true,
+      });
+      if (!activeProctorStream.getVideoTracks().length || !activeProctorStream.getAudioTracks().length) {
+        throw new Error("Both a working camera and microphone are required.");
+      }
+      if (previewRef.current) {
+        previewRef.current.srcObject = activeProctorStream;
+        await previewRef.current.play().catch(() => {});
+      }
+      setDevicesReady(true);
+    } catch (err) {
+      activeProctorStream?.getTracks().forEach((track) => track.stop());
+      activeProctorStream = null;
+      setDevicesReady(false);
+      setError(`${err.message} Allow both permissions in your browser settings, then try again.`);
+    } finally {
+      setPermissionLoading(false);
+    }
+  };
   const begin = async () => {
+    const cameraLive = activeProctorStream?.getVideoTracks().some((track) => track.readyState === "live");
+    const microphoneLive = activeProctorStream?.getAudioTracks().some((track) => track.readyState === "live");
+    if (!devicesReady || !cameraLive || !microphoneLive || !consent) {
+      setDevicesReady(false);
+      setError("Complete the camera and microphone check and accept the assessment rules before starting.");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      await request(`/rounds/${type}/start/`, { method: "POST" });
       await document.documentElement.requestFullscreen();
+      await request(`/rounds/${type}/start/`, { method: "POST" });
+      handoffRef.current = true;
       navigate(`/assessment/${type}`);
     } catch (err) {
+      activeProctorStream?.getTracks().forEach((track) => track.stop());
+      activeProctorStream = null;
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
       setError(err.message);
       setLoading(false);
     }
@@ -655,18 +775,58 @@ function Instructions() {
             </span>
           </div>
           <div>
+            <Camera />
+            <span>
+              <b>Continuous camera and microphone recording</b>
+              <small>
+                Your face must remain visible and you must remain the only person in view. Audio and video are recorded for recruiter review.
+              </small>
+            </span>
+          </div>
+          <div>
             <ShieldCheck />
             <span>
-              <b>Responses auto-save</b>
+              <b>Automated monitoring and rejection</b>
               <small>
-                At zero, the current unanswered question is submitted
-                automatically.
+                Switching tabs, leaving fullscreen, closing the page, disabling the camera or microphone, or detecting multiple faces ends the attempt and can automatically mark it rejected. Three consecutive no-face checks also trigger rejection. The exact reason is saved for the recruiter.
+              </small>
+            </span>
+          </div>
+          <div>
+            <LockKeyhole />
+            <span>
+              <b>No restart without recruiter approval</b>
+              <small>
+                A terminated attempt stays locked. Only an administrator can review the evidence and reset access.
+              </small>
+            </span>
+          </div>
+          <div>
+            <Clock3 />
+            <span>
+              <b>Automatic submission</b>
+              <small>
+                At zero, the current answer is submitted automatically. Questions cannot be revisited, so save each answer before moving on.
               </small>
             </span>
           </div>
         </div>
+        <section className={`device-check ${devicesReady ? "ready" : ""}`}>
+          <video ref={previewRef} muted playsInline />
+          <div>
+            <b>{devicesReady ? "Camera and microphone are ready" : "Permission check required"}</b>
+            <small>{devicesReady ? "Keep your face centered and remain in a quiet, well-lit room." : "Click below and choose Allow for both camera and microphone."}</small>
+            <button className="secondary" type="button" onClick={checkDevices} disabled={permissionLoading}>
+              <Camera /> {permissionLoading ? "Checking devices…" : devicesReady ? "Check devices again" : "Allow camera & microphone"}
+            </button>
+          </div>
+        </section>
+        <label className="rule-consent">
+          <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
+          <span>I have read these rules and consent to camera/microphone recording and automated integrity checks. I understand that a violation may terminate and reject my assessment.</span>
+        </label>
         {error && <div className="error-box">{error}</div>}
-        <button className="primary wide" onClick={begin} disabled={loading}>
+        <button className="primary wide" onClick={begin} disabled={loading || !devicesReady || !consent}>
           {loading ? (
             "Preparing stage…"
           ) : (
@@ -696,10 +856,15 @@ function Assessment() {
   const [busy, setBusy] = useState(false);
   const [runResults, setRunResults] = useState(null);
   const [error, setError] = useState("");
+  const [mediaError, setMediaError] = useState("");
   const submitting = useRef(false);
+  const videoRef = useRef(null);
+  const recorderRef = useRef(null);
+  const uploadChainRef = useRef(Promise.resolve());
   const load = useCallback(async () => {
     try {
       const data = await request(`/rounds/${type}/state/`);
+      setError("");
       setState(data);
       setRemaining(data.remaining_seconds || 0);
       if (data.question?.starter_code) {
@@ -714,9 +879,13 @@ function Assessment() {
         setPreviewCode(starter);
       }
     } catch (e) {
-      setError(e.message);
+      if ([409, 423].includes(e.status)) {
+        navigate("/portal", { replace: true });
+      } else {
+        setError(e.message);
+      }
     }
-  }, [type, language]);
+  }, [type, language, navigate]);
   useEffect(() => {
     load();
   }, [load]);
@@ -733,17 +902,96 @@ function Assessment() {
           details: { path: location.pathname },
         }),
       })
-        .then((data) =>
-          setState((s) => (s ? {
+        .then((data) => {
+          if (data.access_locked) setBlocked(true);
+          return setState((s) => (s ? {
             ...s,
             violations: data.violations,
             access_locked: data.access_locked,
-          } : s)),
-        )
+            rejection_reason: data.rejection_reason,
+          } : s));
+        })
         .catch(() => {}),
     [],
   );
   useEffect(() => {
+    let cancelled = false;
+    let faceTimer;
+    const token = localStorage.getItem("candidateToken");
+    const uploadChunk = (recordingId, sequence, blob) => {
+      uploadChainRef.current = uploadChainRef.current
+        .then(() => fetch(`${API}/proctor/recordings/${recordingId}/chunks/?sequence=${sequence}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream", Authorization: `Bearer ${token}` },
+          body: blob,
+        }))
+        .then((response) => {
+          if (!response.ok) throw new Error("Recording upload failed");
+        })
+        .catch(() => setMediaError("The proctor recording connection was interrupted."));
+    };
+    const startMedia = async () => {
+      try {
+        const stream = activeProctorStream?.active
+          ? activeProctorStream
+          : await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        activeProctorStream = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        stream.getVideoTracks().forEach((track) => track.addEventListener("ended", () => !cancelled && logEvent("camera_disabled"), { once: true }));
+        stream.getAudioTracks().forEach((track) => track.addEventListener("ended", () => !cancelled && logEvent("microphone_disabled"), { once: true }));
+        const mimeType = ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"].find(
+          (value) => window.MediaRecorder?.isTypeSupported(value),
+        );
+        if (!window.MediaRecorder || !mimeType) throw new Error("This browser cannot create the required assessment recording.");
+        const started = await request("/proctor/recordings/start/", {
+          method: "POST", body: JSON.stringify({ mime_type: mimeType }),
+        });
+        let sequence = 0;
+        const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 180000, audioBitsPerSecond: 24000 });
+        recorderRef.current = recorder;
+        recorder.ondataavailable = (event) => {
+          if (event.data.size) uploadChunk(started.id, sequence++, event.data);
+        };
+        recorder.onstop = () => {
+          uploadChainRef.current.finally(() => request(`/proctor/recordings/${started.id}/finish/`, { method: "POST" }).catch(() => {}));
+        };
+        // Larger intervals substantially reduce API and database writes when a
+        // full campus cohort is taking the assessment simultaneously.
+        recorder.start(15000);
+        if ("FaceDetector" in window) {
+          const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 3 });
+          faceTimer = setInterval(async () => {
+            if (!videoRef.current || videoRef.current.readyState < 2) return;
+            try {
+              const faces = await detector.detect(videoRef.current);
+              if (faces.length > 1) logEvent("multiple_faces");
+              else if (faces.length === 0) logEvent("face_missing");
+            } catch {}
+          }, 10000);
+        }
+      } catch (mediaIssue) {
+        setMediaError(mediaIssue.message || "Camera and microphone permission is required.");
+        logEvent("camera_disabled");
+      }
+    };
+    startMedia();
+    return () => {
+      cancelled = true;
+      clearInterval(faceTimer);
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+      activeProctorStream?.getTracks().forEach((track) => track.stop());
+      activeProctorStream = null;
+    };
+  }, [type, logEvent]);
+  useEffect(() => {
+    if (!document.fullscreenElement) logEvent("fullscreen_exit");
     const fs = () => {
       const exited = !document.fullscreenElement;
       setBlocked(exited);
@@ -838,9 +1086,12 @@ function Assessment() {
         navigate("/portal");
       }
     } catch (e) {
-      setError(e.message);
-      if (e.message.includes("advanced")) load();
-      else {
+      if (e.message.includes("advanced")) {
+        await load();
+      } else if ([409, 423].includes(e.status)) {
+        navigate("/portal", { replace: true });
+      } else {
+        setError(e.message);
         setState(submittedState);
         setRemaining(submittedState.remaining_seconds || 0);
         setSelected(selected);
@@ -884,7 +1135,11 @@ function Assessment() {
       });
       setRunResults(data.results);
     } catch (e) {
-      setError(e.message);
+      if ([409, 423].includes(e.status)) {
+        navigate("/portal", { replace: true });
+      } else {
+        setError(e.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -916,6 +1171,16 @@ function Assessment() {
         <div className="violation">
           <ShieldCheck size={16} />
           {state.violations} violations
+        </div>
+        <div className="proctor-live" title="Camera and microphone recording active">
+          <video ref={(node) => {
+            videoRef.current = node;
+            if (node && activeProctorStream) {
+              node.srcObject = activeProctorStream;
+              node.play().catch(() => {});
+            }
+          }} muted playsInline />
+          <span><i /> REC</span>
         </div>
       </header>
       <div className="test-progress">
@@ -1077,19 +1342,26 @@ function Assessment() {
           </div>
         </main>
       )}
-      {blocked && (
+      {(blocked || mediaError) && (
         <div className="fullscreen-block">
           <div>
-            {state.access_locked ? <LockKeyhole /> : <Maximize2 />}
-            <h2>{state.access_locked ? "Assessment access locked" : "Verifying exam session"}</h2>
-            <p>{state.access_locked
-              ? "You left the protected exam screen. This attempt has ended and cannot be resumed until an administrator resets your access."
-              : "Please wait while the portal verifies this fullscreen exit."}</p>
-            {state.access_locked && (
+            {state.access_locked || mediaError ? <LockKeyhole /> : <Maximize2 />}
+            <h2>{state.access_locked || mediaError ? "Assessment access locked" : "Verifying exam session"}</h2>
+            <p>{mediaError || (state.access_locked
+              ? state.rejection_reason || "You left the protected exam screen. This attempt has ended and cannot be resumed until an administrator resets your access."
+              : "Please wait while the portal verifies this fullscreen exit.")}</p>
+            {(state.access_locked || mediaError) && (
               <button className="primary" onClick={() => navigate("/portal")}>
                 Return to assessment centre
               </button>
             )}
+          </div>
+          <div>
+            <Camera />
+            <span>
+              <b>Camera and microphone are required</b>
+              <small>Your assessment session is recorded and checked for integrity. Denying or disabling either device ends the attempt.</small>
+            </span>
           </div>
         </div>
       )}
@@ -1293,10 +1565,28 @@ function AdminDashboard() {
       window.alert(error.message);
     }
   };
+  const deleteAllSelected = async () => {
+    const count = data.candidates.filter((candidate) => candidate.hiring_status === "selected").length;
+    if (!count || !window.confirm(`Delete all ${count} selected candidates and their files, recordings, and assessment data? This cannot be undone.`)) return;
+    try {
+      await request("/staff/selected/delete-all/", { method: "DELETE" }, true);
+      setData((current) => ({ ...current, candidates: current.candidates.filter((candidate) => candidate.hiring_status !== "selected") }));
+      setSelected(null);
+      setDetail(null);
+    } catch (error) {
+      window.alert(error.message);
+    }
+  };
   if (!data) return <Loader />;
-  const colleges = [...new Set(data.candidates.map((candidate) => candidate.college.trim()).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right));
-  const rows = data.candidates.filter((c) => {
+  const collegeKey = (value) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  const collegeMap = new Map();
+  data.candidates.forEach((candidate) => {
+    const key = collegeKey(candidate.college);
+    if (key && !collegeMap.has(key)) collegeMap.set(key, candidate.college.trim().replace(/\s+/g, " "));
+  });
+  const colleges = [...collegeMap.entries()].sort((left, right) => left[1].localeCompare(right[1]));
+  const tableCandidates = tab === "selected" ? data.candidates.filter((candidate) => candidate.hiring_status === "selected") : data.candidates;
+  const rows = tableCandidates.filter((c) => {
     const violations = c.rounds.reduce(
       (sum, round) => sum + round.violations,
       0,
@@ -1314,7 +1604,7 @@ function AdminDashboard() {
       (integrityFilter === "high" && violations >= 3);
     return (
       (!role || c.role === role) &&
-      (!collegeFilter || c.college === collegeFilter) &&
+      (!collegeFilter || collegeKey(c.college) === collegeFilter) &&
       (!locationFilter || c.preferred_location === locationFilter) &&
       (!hiringFilter || c.hiring_status === hiringFilter) &&
       (!assessmentFilter || c.status === assessmentFilter) &&
@@ -1369,6 +1659,7 @@ function AdminDashboard() {
     overview: "Hiring overview",
     candidates: "Candidate directory",
     analytics: "Assessment analytics",
+    selected: "Selected candidates",
   };
   return (
     <div className="admin-page">
@@ -1396,6 +1687,13 @@ function AdminDashboard() {
             <BarChart3 />
             Assessment analytics
           </button>
+          <button
+            className={tab === "selected" ? "active" : ""}
+            onClick={() => setTab("selected")}
+          >
+            <Check />
+            Selected candidates
+          </button>
         </nav>
         <div className="aside-foot">
           <span>Recruitment drive</span>
@@ -1422,7 +1720,7 @@ function AdminDashboard() {
             <i /> Assessment live
           </div>
         </header>
-        {tab !== "candidates" && (
+        {tab !== "candidates" && tab !== "selected" && (
           <div className="stat-grid">
             <Stat
               icon={UsersRound}
@@ -1561,10 +1859,13 @@ function AdminDashboard() {
           <section className="panel candidate-table">
             <div className="panel-head">
               <div>
-                <h3>All candidates</h3>
-                <p>Ranked by overall performance</p>
-              </div>
+                  <h3>{tab === "selected" ? "Selected candidates" : "All candidates"}</h3>
+                  <p>{tab === "selected" ? `${tableCandidates.length} candidates selected for the next step` : "Ranked by overall performance"}</p>
+                </div>
               <div className="filters">
+                {tab === "selected" && tableCandidates.length > 0 && (
+                  <button className="danger-action" onClick={deleteAllSelected}><Trash2 /> Delete all selected</button>
+                )}
                 <label>
                   <Search />
                   <input
@@ -1586,8 +1887,8 @@ function AdminDashboard() {
                   onChange={(e) => setCollegeFilter(e.target.value)}
                 >
                   <option value="">All colleges</option>
-                  {colleges.map((college) => (
-                    <option key={college} value={college}>
+                  {colleges.map(([key, college]) => (
+                    <option key={key} value={key}>
                       {college}
                     </option>
                   ))}
@@ -1684,6 +1985,7 @@ function AdminDashboard() {
                     <th>Test cases</th>
                     <th>Violations</th>
                     <th>Score</th>
+                    <th>Resume</th>
                     <th />
                   </tr>
                 </thead>
@@ -1735,6 +2037,13 @@ function AdminDashboard() {
                       <td>{c.rounds.reduce((s, r) => s + r.violations, 0)}</td>
                       <td>
                         <b className="score">{c.percentage}%</b>
+                      </td>
+                      <td>
+                        {c.resume ? (
+                          <button className="file-btn" title={`Download ${c.resume.name}`} onClick={() => downloadResume(c).catch((error) => window.alert(error.message))}>
+                            <Download /> {c.resume.name}
+                          </button>
+                        ) : <span className="muted">Legacy record</span>}
                       </td>
                       <td>
                         <button className="view-btn" onClick={() => open(c)}>
@@ -1797,6 +2106,24 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
   const [statusDraft, setStatusDraft] = useState(candidate.hiring_status);
   const [statusNote, setStatusNote] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
+  const [recordingUrls, setRecordingUrls] = useState({});
+  const recordingUrlsRef = useRef({});
+  useEffect(() => () => Object.values(recordingUrlsRef.current).forEach((url) => URL.revokeObjectURL(url)), []);
+  const viewRecording = async (recording) => {
+    try {
+      const parts = [];
+      for (let sequence = 0; sequence < recording.chunks; sequence += 1) {
+        const { blob } = await adminBlob(`/staff/recordings/${recording.id}/?sequence=${sequence}`);
+        parts.push(blob);
+      }
+      const blob = new Blob(parts, { type: recording.mime_type || "video/webm" });
+      const url = URL.createObjectURL(blob);
+      recordingUrlsRef.current[recording.id] = url;
+      setRecordingUrls((current) => ({ ...current, [recording.id]: url }));
+    } catch (error) {
+      window.alert(error.message);
+    }
+  };
   const saveStatus = async () => {
     setSavingStatus(true);
     try {
@@ -1850,6 +2177,34 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             <b>{candidate.address || "Not provided"}</b>
           </div>
         </div>
+        <div className="candidate-files">
+          <button className="secondary" disabled={!candidate.resume} onClick={() => downloadResume(candidate).catch((error) => window.alert(error.message))}>
+            <Download /> {candidate.resume ? `Download ${candidate.resume.name}` : "No resume (legacy record)"}
+          </button>
+        </div>
+        {detail?.ai_rejection_reason && (
+          <div className="ai-rejection">
+            <ShieldCheck />
+            <span><b>Automated proctoring rejection</b><small>{detail.ai_rejection_reason}</small></span>
+          </div>
+        )}
+        {detail?.recordings?.length > 0 && (
+          <>
+            <h3>Proctored assessment recordings</h3>
+            <div className="recording-list">
+              {detail.recordings.map((recording) => (
+                <div key={recording.id}>
+                  <span><Video /><b>{roundMeta[recording.round]?.title || recording.round}</b><small>{Math.round(recording.size / 1024)} KB · {recording.completed_at ? "Complete" : "Processing"}</small></span>
+                  {!recordingUrls[recording.id] ? (
+                    <button className="secondary" onClick={() => viewRecording(recording)}><Play /> View recording</button>
+                  ) : (
+                    <video controls src={recordingUrls[recording.id]} />
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
         <div className="workflow-editor">
           <h3>Update recruitment status</h3>
           <select
