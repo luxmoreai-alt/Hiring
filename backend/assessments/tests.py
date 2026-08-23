@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -10,9 +11,9 @@ from unittest.mock import patch
 
 from .auth import make_token
 from .emails import send_completion_email, send_registration_email
-from .models import AssessmentReset, Candidate, CandidateStatusHistory, ProctorRecording, Question
+from .models import AssessmentReset, Attempt, Candidate, CandidateStatusHistory, ProctorRecording, Question
 from .runner import _judge0_languages_cache, available_languages, run_code
-from .views import evaluate_react_solution, public_question
+from .views import ROUND_PASS_SCORES, advance, evaluate_react_solution, public_question
 
 
 class AssessmentFlowTests(TestCase):
@@ -81,6 +82,65 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(duplicate.data["state"]["current"], 1)
         candidate = Candidate.objects.get(id=registration["candidate"]["id"])
         self.assertEqual(candidate.attempts.get(round_type="aptitude").responses.count(), 1)
+
+    def test_each_round_rejects_below_its_required_score(self):
+        round_details = {
+            "aptitude": ("aptitude", Decimal("60")),
+            "technical": ("technical", Decimal("20")),
+            "coding": ("coding", Decimal("20")),
+        }
+        for index, (round_type, (candidate_status, max_score)) in enumerate(round_details.items()):
+            with self.subTest(round_type=round_type):
+                candidate = Candidate.objects.create(
+                    name=f"Failed {round_type}", email=f"failed-{index}@example.com",
+                    phone=f"98765432{index:02d}", college="Example Institute",
+                    designation="B.Tech", address="Chennai", role="mern-stack-developer",
+                    status=candidate_status,
+                )
+                attempt = Attempt.objects.create(
+                    candidate=candidate, round_type=round_type, question_ids=[1],
+                    score=ROUND_PASS_SCORES[round_type] - 1, max_score=max_score,
+                )
+
+                advance(attempt)
+                candidate.refresh_from_db()
+
+                self.assertEqual(candidate.hiring_status, "rejected")
+                self.assertEqual(candidate.status, round_type)
+                self.assertIn("minimum score", candidate.ai_rejection_reason.lower())
+                self.assertTrue(CandidateStatusHistory.objects.filter(
+                    candidate=candidate, to_status="rejected",
+                ).exists())
+
+                self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(candidate.id)}")
+                next_round = "technical" if round_type == "aptitude" else "coding"
+                blocked = self.client.post(f"/api/rounds/{next_round}/start/", {}, format="json")
+                self.assertEqual(blocked.status_code, 423)
+
+    def test_score_equal_to_threshold_advances_candidate(self):
+        cases = [
+            ("aptitude", "aptitude", "technical", "assessment_pending", Decimal("60")),
+            ("technical", "technical", "coding", "assessment_pending", Decimal("20")),
+            ("coding", "coding", "completed", "assessment_completed", Decimal("20")),
+        ]
+        for index, (round_type, starting_status, expected_status, expected_hiring, max_score) in enumerate(cases):
+            with self.subTest(round_type=round_type):
+                candidate = Candidate.objects.create(
+                    name=f"Passed {round_type}", email=f"passed-{index}@example.com",
+                    phone=f"97654321{index:02d}", college="Example Institute",
+                    designation="B.Tech", address="Chennai", role="mern-stack-developer",
+                    status=starting_status,
+                )
+                attempt = Attempt.objects.create(
+                    candidate=candidate, round_type=round_type, question_ids=[1],
+                    score=ROUND_PASS_SCORES[round_type], max_score=max_score,
+                )
+
+                advance(attempt)
+                candidate.refresh_from_db()
+
+                self.assertEqual(candidate.status, expected_status)
+                self.assertEqual(candidate.hiring_status, expected_hiring)
 
     def test_stale_coding_requests_return_conflict_instead_of_not_found(self):
         self.register_candidate()

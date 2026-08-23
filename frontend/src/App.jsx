@@ -84,16 +84,19 @@ const roundMeta = {
   aptitude: {
     title: "Cognitive aptitude",
     caption: "60 questions · 60 minutes",
+    passRequirement: "Score at least 30 out of 60 to continue",
     icon: BarChart3,
   },
   technical: {
-    title: "Role knowledge",
+    title: "Technical aptitude",
     caption: "20 questions · 20 minutes",
+    passRequirement: "Score at least 10 out of 20 to continue",
     icon: UserRound,
   },
   coding: {
     title: "Coding challenge",
     caption: "2 problems · 40 minutes",
+    passRequirement: "Score at least 10 out of 20 to complete the assessment",
     icon: Code2,
   },
 };
@@ -560,13 +563,22 @@ function Portal() {
         {candidate.access_locked ? (
           <section className="completion access-lock-card">
             <div className="trophy"><LockKeyhole /></div>
-            <span className="eyebrow"><span /> Access locked</span>
+            <span className="eyebrow"><span /> Application rejected</span>
             <h2>This assessment session has ended.</h2>
             <p>
               Leaving fullscreen or switching away from the exam ends the session.
               Contact the recruitment administrator if you need another attempt.
             </p>
+            <div className="result-private-note rejection-note">
+              <X size={18} />
+              <span>
+                <b>Reason for rejection</b>
+                {candidate.ai_rejection_reason || "The protected assessment session was interrupted or an integrity rule was violated."}
+              </span>
+            </div>
           </section>
+        ) : candidate.hiring_status === "rejected" ? (
+          <Rejection candidate={candidate} />
         ) : candidate.status === "completed" ? (
           <Completion candidate={candidate} />
         ) : (
@@ -660,6 +672,27 @@ function Completion({ candidate }) {
         <span>
           <b>Results are confidential</b>Your assessment results are available
           only to the Luxmor recruitment team.
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function Rejection({ candidate }) {
+  return (
+    <section className="completion rejection-card">
+      <div className="trophy rejection-icon"><X /></div>
+      <span className="eyebrow"><span /> Assessment result</span>
+      <h2>Thank you for your time, {candidate.name.split(" ")[0]}.</h2>
+      <p>
+        You did not reach the minimum score required to continue to the next
+        round, so your assessment has ended.
+      </p>
+      <div className="result-private-note rejection-note">
+        <X size={18} />
+        <span>
+          <b>Reason for rejection</b>
+          {candidate.ai_rejection_reason || "The required score for this round was not met."}
         </span>
       </div>
     </section>
@@ -807,6 +840,16 @@ function Instructions() {
               <b>Automatic submission</b>
               <small>
                 At zero, the current answer is submitted automatically. Questions cannot be revisited, so save each answer before moving on.
+              </small>
+            </span>
+          </div>
+          <div>
+            <BarChart3 />
+            <span>
+              <b>Minimum score required</b>
+              <small>
+                {meta.passRequirement}. A lower score ends the assessment and
+                prevents access to the next stage.
               </small>
             </span>
           </div>

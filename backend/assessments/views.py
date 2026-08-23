@@ -25,6 +25,8 @@ from .runner import DEFAULT_STARTERS, available_languages, run_code
 
 ROUND_ORDER = ["aptitude", "technical", "coding"]
 ROUND_LIMITS = {"aptitude": 60, "technical": 20, "coding": 2}
+ROUND_PASS_SCORES = {"aptitude": Decimal("30"), "technical": Decimal("10"), "coding": Decimal("10")}
+ROUND_LABELS = {"aptitude": "Cognitive aptitude", "technical": "Technical aptitude", "coding": "Coding challenge"}
 QUESTION_SECONDS = {"aptitude": 60, "technical": 60, "coding": 1200}
 MAX_RESUME_BYTES = 3 * 1024 * 1024
 RESUME_TYPES = {
@@ -190,6 +192,7 @@ def attempt_state(attempt):
     payload = {
         "id": attempt.id, "round_type": attempt.round_type, "status": attempt.status,
         "current": attempt.current_index, "total": total, "score": float(attempt.score),
+        "pass_score": float(ROUND_PASS_SCORES[attempt.round_type]),
         "question_seconds": QUESTION_SECONDS[attempt.round_type], "violations": attempt.violation_count,
     }
     if attempt.status == "in_progress" and attempt.current_index < total:
@@ -211,8 +214,29 @@ def advance(attempt, auto=False):
         attempt.completed_at = timezone.now()
         attempt.question_started_at = None
         candidate = attempt.candidate
-        if attempt.round_type == "aptitude": candidate.status = "technical"
-        elif attempt.round_type == "technical": candidate.status = "coding"
+        pass_score = ROUND_PASS_SCORES[attempt.round_type]
+        if attempt.score < pass_score:
+            old_hiring_status = candidate.hiring_status
+            candidate.status = attempt.round_type
+            candidate.hiring_status = "rejected"
+            candidate.hiring_status_updated_at = timezone.now()
+            candidate.ai_rejection_reason = (
+                f"You scored {float(attempt.score):g}/{float(attempt.max_score):g} in the "
+                f"{ROUND_LABELS[attempt.round_type]} round. A minimum score of "
+                f"{float(pass_score):g} is required to continue."
+            )
+            candidate.ai_rejected_at = timezone.now()
+            CandidateStatusHistory.objects.create(
+                candidate=candidate,
+                from_status=old_hiring_status,
+                to_status="rejected",
+                note=f"Assessment threshold: {candidate.ai_rejection_reason}",
+                changed_by=None,
+            )
+        elif attempt.round_type == "aptitude":
+            candidate.status = "technical"
+        elif attempt.round_type == "technical":
+            candidate.status = "coding"
         else:
             candidate.status = "completed"
             candidate.completed_at = timezone.now()
@@ -220,7 +244,10 @@ def advance(attempt, auto=False):
             if candidate.hiring_status == "assessment_pending":
                 candidate.hiring_status = "assessment_completed"
                 candidate.hiring_status_updated_at = timezone.now()
-        candidate.save(update_fields=["status", "completed_at", "hiring_status", "hiring_status_updated_at"])
+        candidate.save(update_fields=[
+            "status", "completed_at", "hiring_status", "hiring_status_updated_at",
+            "ai_rejection_reason", "ai_rejected_at",
+        ])
         if completed_assessment:
             completed_candidate = candidate
     else:
@@ -308,6 +335,8 @@ def me(request):
 @api_view(["POST"])
 def start_round(request, round_type):
     candidate = candidate_for(request)
+    if candidate.hiring_status == "rejected":
+        return ApiResponse({"detail": candidate.ai_rejection_reason or "This assessment has ended."}, status=423)
     if candidate.access_locked:
         return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
     if round_type not in ROUND_ORDER:
@@ -337,6 +366,8 @@ def start_round(request, round_type):
 @api_view(["GET"])
 def round_state(request, round_type):
     candidate = candidate_for(request)
+    if candidate.hiring_status == "rejected":
+        return ApiResponse({"detail": candidate.ai_rejection_reason or "This assessment has ended."}, status=423)
     if candidate.access_locked:
         return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
     attempt = Attempt.objects.filter(
@@ -354,6 +385,8 @@ def round_state(request, round_type):
 @transaction.atomic
 def submit_answer(request, round_type):
     candidate = candidate_for(request)
+    if candidate.hiring_status == "rejected":
+        return ApiResponse({"detail": candidate.ai_rejection_reason or "This assessment has ended."}, status=423)
     if candidate.access_locked:
         return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
     attempt = Attempt.objects.select_for_update().filter(
@@ -639,9 +672,12 @@ def admin_candidate_reset(request, candidate_id):
         candidate.completed_at = None
         candidate.hiring_status = "assessment_pending"
         candidate.hiring_status_updated_at = timezone.now()
+        candidate.ai_rejection_reason = ""
+        candidate.ai_rejected_at = None
         candidate.save(update_fields=[
             "assessment_cycle", "status", "access_locked", "completed_at",
-            "hiring_status", "hiring_status_updated_at",
+            "hiring_status", "hiring_status_updated_at", "ai_rejection_reason",
+            "ai_rejected_at",
         ])
     return ApiResponse({
         "reset": True,

@@ -574,6 +574,35 @@ textarea:focus {
   margin: 0 auto 35px;
   line-height: 1.6;
 }
+.rejection-card {
+  border-color: #f1c4ca;
+}
+.rejection-icon {
+  background: #fff0f1;
+  color: #c63246;
+}
+.rejection-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: #fff0f1;
+  color: #9f2637;
+  text-align: left;
+}
+.rejection-note > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.rejection-note span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.5;
+}
 .completion-stats {
   display: flex;
   justify-content: center;
