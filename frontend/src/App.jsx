@@ -18,11 +18,13 @@ import {
   Download,
   Eye,
   EyeOff,
+  FileText,
   LayoutDashboard,
   LockKeyhole,
   LogOut,
   Maximize2,
   Play,
+  Printer,
   RotateCcw,
   Search,
   ShieldCheck,
@@ -1514,6 +1516,9 @@ function AdminDashboard() {
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("");
   const [collegeFilter, setCollegeFilter] = useState("");
+  const [reportColleges, setReportColleges] = useState([]);
+  const [reportStatuses, setReportStatuses] = useState(["selected", "rejected"]);
+  const [collegeMenuOpen, setCollegeMenuOpen] = useState(false);
   const [locationFilter, setLocationFilter] = useState("");
   const [hiringFilter, setHiringFilter] = useState("");
   const [assessmentFilter, setAssessmentFilter] = useState("");
@@ -1620,6 +1625,18 @@ function AdminDashboard() {
       window.alert(error.message);
     }
   };
+  const deleteAllRejected = async () => {
+    const count = data.candidates.filter((candidate) => candidate.hiring_status === "rejected").length;
+    if (!count || !window.confirm(`Delete all ${count} rejected candidates and their files, recordings, and assessment data? This cannot be undone.`)) return;
+    try {
+      await request("/staff/rejected/delete-all/", { method: "DELETE" }, true);
+      setData((current) => ({ ...current, candidates: current.candidates.filter((candidate) => candidate.hiring_status !== "rejected") }));
+      setSelected(null);
+      setDetail(null);
+    } catch (error) {
+      window.alert(error.message);
+    }
+  };
   if (!data) return <Loader />;
   const collegeKey = (value) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
   const collegeMap = new Map();
@@ -1628,7 +1645,77 @@ function AdminDashboard() {
     if (key && !collegeMap.has(key)) collegeMap.set(key, candidate.college.trim().replace(/\s+/g, " "));
   });
   const colleges = [...collegeMap.entries()].sort((left, right) => left[1].localeCompare(right[1]));
-  const tableCandidates = tab === "selected" ? data.candidates.filter((candidate) => candidate.hiring_status === "selected") : data.candidates;
+  const reportCandidates = data.candidates.filter(
+    (candidate) =>
+      (!reportColleges.length || reportColleges.includes(collegeKey(candidate.college))) &&
+      reportStatuses.includes(candidate.hiring_status),
+  );
+  const collegeReport = colleges
+    .filter(([key]) => !reportColleges.length || reportColleges.includes(key))
+    .map(([key, college]) => {
+      const candidates = data.candidates.filter((candidate) => collegeKey(candidate.college) === key);
+      return {
+        key,
+        college,
+        total: candidates.length,
+        selected: candidates.filter((candidate) => candidate.hiring_status === "selected").length,
+        rejected: candidates.filter((candidate) => candidate.hiring_status === "rejected").length,
+        reported: candidates.filter((candidate) => reportStatuses.includes(candidate.hiring_status)).length,
+      };
+    })
+    .filter((item) => item.reported > 0);
+  const toggleReportCollege = (key) => {
+    setReportColleges((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+    );
+  };
+  const toggleReportStatus = (status) => {
+    setReportStatuses((current) =>
+      current.includes(status) ? current.filter((item) => item !== status) : [...current, status],
+    );
+  };
+  const downloadReport = () => {
+    const columns = [
+      "Student name", "Email", "Phone", "College", "Degree / designation", "Role",
+      "Preferred location", "Hiring status", "Assessment status", "Overall score",
+      "Aptitude score", "Technical score", "Coding score", "Test cases passed",
+      "Total test cases", "Violations", "Registered at",
+    ];
+    const csvCell = (value) => {
+      const text = String(value ?? "");
+      const spreadsheetSafe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+      return `"${spreadsheetSafe.replaceAll('"', '""')}"`;
+    };
+    const lines = reportCandidates.map((candidate) => {
+      const round = (type) => candidate.rounds.find((item) => item.round_type === type);
+      const score = (type) => {
+        const item = round(type);
+        return item ? `${item.score}/${item.max_score}` : "Not attempted";
+      };
+      return [
+        candidate.name, candidate.email, candidate.phone, candidate.college,
+        candidate.designation, candidate.role_label, candidate.preferred_location_label,
+        candidate.hiring_status_label, candidate.status, `${candidate.percentage}%`,
+        score("aptitude"), score("technical"), score("coding"),
+        candidate.rounds.reduce((sum, item) => sum + item.passed_tests, 0),
+        candidate.rounds.reduce((sum, item) => sum + item.total_tests, 0),
+        candidate.rounds.reduce((sum, item) => sum + item.violations, 0),
+        candidate.registered_at ? new Date(candidate.registered_at).toLocaleString() : "",
+      ].map(csvCell).join(",");
+    });
+    const blob = new Blob(["\ufeff", columns.map(csvCell).join(","), "\r\n", lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `student-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const tableCandidates = tab === "selected"
+    ? data.candidates.filter((candidate) => candidate.hiring_status === "selected")
+    : tab === "rejected"
+      ? data.candidates.filter((candidate) => candidate.hiring_status === "rejected")
+      : data.candidates;
   const rows = tableCandidates.filter((c) => {
     const violations = c.rounds.reduce(
       (sum, round) => sum + round.violations,
@@ -1703,6 +1790,8 @@ function AdminDashboard() {
     candidates: "Candidate directory",
     analytics: "Assessment analytics",
     selected: "Selected candidates",
+    rejected: "Rejected candidates",
+    reports: "College reports",
   };
   return (
     <div className="admin-page">
@@ -1737,6 +1826,20 @@ function AdminDashboard() {
             <Check />
             Selected candidates
           </button>
+          <button
+            className={tab === "rejected" ? "active" : ""}
+            onClick={() => setTab("rejected")}
+          >
+            <X />
+            Rejected candidates
+          </button>
+          <button
+            className={tab === "reports" ? "active" : ""}
+            onClick={() => setTab("reports")}
+          >
+            <FileText />
+            Reports
+          </button>
         </nav>
         <div className="aside-foot">
           <span>Recruitment drive</span>
@@ -1763,7 +1866,7 @@ function AdminDashboard() {
             <i /> Assessment live
           </div>
         </header>
-        {tab !== "candidates" && tab !== "selected" && (
+        {tab !== "candidates" && tab !== "selected" && tab !== "rejected" && tab !== "reports" && (
           <div className="stat-grid">
             <Stat
               icon={UsersRound}
@@ -1898,16 +2001,125 @@ function AdminDashboard() {
             </section>
           </div>
         )}
-        {tab !== "analytics" && (
+        {tab === "reports" && (
+          <section className="panel reports-panel">
+            <div className="panel-head reports-head">
+              <div>
+                <h3>Student selection report</h3>
+                <p>Select one or more colleges and the result types you want to include.</p>
+              </div>
+              <div className="report-actions">
+                <button className="secondary" onClick={() => window.print()} disabled={!reportCandidates.length}>
+                  <Printer /> Print / PDF
+                </button>
+                <button className="primary" onClick={downloadReport} disabled={!reportCandidates.length}>
+                  <Download /> Download detailed CSV
+                </button>
+              </div>
+            </div>
+            <div className="report-controls">
+              <div className="report-control">
+                <span className="report-label">Colleges</span>
+                <div className="multi-select">
+                  <button type="button" onClick={() => setCollegeMenuOpen((open) => !open)}>
+                    <span>
+                      {!reportColleges.length
+                        ? "All colleges"
+                        : reportColleges.length === 1
+                          ? collegeMap.get(reportColleges[0])
+                          : `${reportColleges.length} colleges selected`}
+                    </span>
+                    <ChevronLeft className={collegeMenuOpen ? "multi-arrow open" : "multi-arrow"} />
+                  </button>
+                  {collegeMenuOpen && (
+                    <div className="multi-menu">
+                      <label>
+                        <input type="checkbox" checked={!reportColleges.length} onChange={() => setReportColleges([])} />
+                        <b>All colleges</b>
+                      </label>
+                      {colleges.map(([key, college]) => (
+                        <label key={key}>
+                          <input type="checkbox" checked={reportColleges.includes(key)} onChange={() => toggleReportCollege(key)} />
+                          <span>{college}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="report-control">
+                <span className="report-label">Report type</span>
+                <div className="report-status-options">
+                  <label className="selected-option">
+                    <input type="checkbox" checked={reportStatuses.includes("selected")} onChange={() => toggleReportStatus("selected")} />
+                    <Check /> Selected
+                  </label>
+                  <label className="rejected-option">
+                    <input type="checkbox" checked={reportStatuses.includes("rejected")} onChange={() => toggleReportStatus("rejected")} />
+                    <X /> Rejected
+                  </label>
+                </div>
+              </div>
+            </div>
+            {!reportStatuses.length ? (
+              <div className="empty">Choose Selected, Rejected, or both to create a report.</div>
+            ) : (
+              <>
+                <div className="report-summary">
+                  <Stat icon={UsersRound} label="Students in report" value={reportCandidates.length} />
+                  <Stat icon={Check} label="Selected" value={reportCandidates.filter((candidate) => candidate.hiring_status === "selected").length} />
+                  <Stat icon={X} label="Rejected" value={reportCandidates.filter((candidate) => candidate.hiring_status === "rejected").length} />
+                  <Stat icon={FileText} label="Colleges" value={collegeReport.length} />
+                </div>
+                <div className="college-report-grid">
+                  {collegeReport.map((item) => (
+                    <article key={item.key}>
+                      <h4>{item.college}</h4>
+                      <span>{item.total} total students</span>
+                      <div><b className="report-selected">{item.selected}</b><small>Selected</small></div>
+                      <div><b className="report-rejected">{item.rejected}</b><small>Rejected</small></div>
+                    </article>
+                  ))}
+                </div>
+                <div className="table-scroll report-table">
+                  <table>
+                    <thead>
+                      <tr><th>Student</th><th>College</th><th>Role</th><th>Result</th><th>Assessment</th><th>Score</th><th>Violations</th><th>Details</th></tr>
+                    </thead>
+                    <tbody>
+                      {reportCandidates.map((candidate) => (
+                        <tr key={candidate.id}>
+                          <td><div className="person"><span>{candidate.name[0]}</span><div><b>{candidate.name}</b><small>{candidate.email} · {candidate.phone}</small></div></div></td>
+                          <td>{candidate.college}<br /><small>{candidate.designation}</small></td>
+                          <td>{candidate.role_label}<br /><small>{candidate.preferred_location_label}</small></td>
+                          <td><span className={`report-result ${candidate.hiring_status}`}>{candidate.hiring_status_label}</span></td>
+                          <td>{candidate.status}</td>
+                          <td><b className="score">{candidate.percentage}%</b></td>
+                          <td>{candidate.rounds.reduce((sum, item) => sum + item.violations, 0)}</td>
+                          <td><button className="view-btn" aria-label={`View ${candidate.name}'s detailed report`} onClick={() => open(candidate)}><Eye /></button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!reportCandidates.length && <div className="empty">No students match the selected report options.</div>}
+                </div>
+              </>
+            )}
+          </section>
+        )}
+        {tab !== "analytics" && tab !== "reports" && (
           <section className="panel candidate-table">
             <div className="panel-head">
               <div>
-                  <h3>{tab === "selected" ? "Selected candidates" : "All candidates"}</h3>
-                  <p>{tab === "selected" ? `${tableCandidates.length} candidates selected for the next step` : "Ranked by overall performance"}</p>
+                  <h3>{tab === "selected" ? "Selected candidates" : tab === "rejected" ? "Rejected candidates" : "All candidates"}</h3>
+                  <p>{tab === "selected" ? `${tableCandidates.length} candidates selected for the next step` : tab === "rejected" ? `${tableCandidates.length} candidates rejected` : "Ranked by overall performance"}</p>
                 </div>
               <div className="filters">
                 {tab === "selected" && tableCandidates.length > 0 && (
                   <button className="danger-action" onClick={deleteAllSelected}><Trash2 /> Delete all selected</button>
+                )}
+                {tab === "rejected" && tableCandidates.length > 0 && (
+                  <button className="danger-action" onClick={deleteAllRejected}><Trash2 /> Delete all rejected</button>
                 )}
                 <label>
                   <Search />

@@ -327,6 +327,15 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(response.data["deleted"], 1)
         self.assertTrue(Candidate.objects.filter(id=kept.id).exists())
 
+    def test_staff_can_bulk_delete_only_rejected_candidates(self):
+        Candidate.objects.create(name="Rejected", email="rejected@example.com", phone="9999999999", college="C", designation="B", address="X", role="data-analyst", hiring_status="rejected")
+        kept = Candidate.objects.create(name="Selected", email="selected-kept@example.com", phone="8888888888", college="C", designation="B", address="X", role="data-analyst", hiring_status="selected")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
+        response = self.client.delete("/api/staff/rejected/delete-all/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["deleted"], 1)
+        self.assertTrue(Candidate.objects.filter(id=kept.id).exists())
+
     def test_leaving_exam_terminates_and_locks_access(self):
         self.register_candidate()
         started = self.client.post("/api/rounds/aptitude/start/", {}, format="json")

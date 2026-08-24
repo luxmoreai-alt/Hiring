@@ -20,6 +20,7 @@ urlpatterns = [
     path("staff/recordings/<int:recording_id>/", views.admin_recording),
     path("staff/candidates/<uuid:candidate_id>/delete/", views.admin_candidate_delete),
     path("staff/selected/delete-all/", views.admin_selected_delete_all),
+    path("staff/rejected/delete-all/", views.admin_rejected_delete_all),
     path("staff/candidates/<uuid:candidate_id>/reset/", views.admin_candidate_reset),
     path("staff/candidates/<uuid:candidate_id>/status/", views.admin_candidate_status),
 ]

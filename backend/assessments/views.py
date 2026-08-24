@@ -655,6 +655,15 @@ def admin_selected_delete_all(request):
     return ApiResponse({"deleted": count})
 
 
+@api_view(["DELETE"])
+def admin_rejected_delete_all(request):
+    require_admin(request)
+    queryset = Candidate.objects.filter(hiring_status="rejected")
+    count = queryset.count()
+    queryset.delete()
+    return ApiResponse({"deleted": count})
+
+
 @api_view(["POST"])
 def admin_candidate_reset(request, candidate_id):
     admin_user = require_admin(request)
