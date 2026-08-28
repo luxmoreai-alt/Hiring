@@ -285,10 +285,10 @@ def register(request):
         return ApiResponse({"detail": "Please select a valid role"}, status=400)
     if request.data["preferred_location"] not in dict(Candidate.LOCATION_CHOICES):
         return ApiResponse({"detail": "Please select a valid preferred work location"}, status=400)
-    college = " ".join(str(request.data["college"]).split())
+    college = " ".join(str(request.data["college"]).split()).upper()
     college_key = normalized_college(college)
     canonical = Candidate.objects.filter(college_normalized=college_key).exclude(college="").values_list("college", flat=True).first()
-    college = canonical or college
+    college = (canonical or college).upper()
     existing = Candidate.objects.filter(email=email).first()
     if existing:
         if email in test_retake_emails():

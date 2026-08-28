@@ -69,6 +69,12 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(answered.data["state"]["score"], 1)
         self.assertEqual(answered.data["state"]["current"], 1)
 
+    def test_registration_stores_college_name_in_capital_letters(self):
+        registration = self.register_candidate()
+        candidate = Candidate.objects.get(id=registration["candidate"]["id"])
+        self.assertEqual(candidate.college, "EXAMPLE INSTITUTE")
+        self.assertEqual(registration["candidate"]["college"], "EXAMPLE INSTITUTE")
+
     def test_duplicate_answer_returns_current_state_without_error(self):
         registration = self.register_candidate()
         started = self.client.post("/api/rounds/aptitude/start/", {}, format="json")

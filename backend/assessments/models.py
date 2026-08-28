@@ -50,7 +50,7 @@ class Candidate(models.Model):
     ai_rejected_at = models.DateTimeField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
-        self.college = " ".join((self.college or "").split())
+        self.college = " ".join((self.college or "").split()).upper()
         self.college_normalized = self.college.casefold()
         super().save(*args, **kwargs)
 

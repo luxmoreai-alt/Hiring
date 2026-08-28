@@ -337,9 +337,10 @@ function Landing() {
                 <input
                   required
                   value={form.college}
-                  onChange={set("college")}
-                  placeholder="Institution name"
+                  onChange={(event) => setForm({ ...form, college: event.target.value.toUpperCase() })}
+                  placeholder="E.G. ANNA UNIVERSITY"
                 />
+                <small className="field-help">Enter your college&apos;s full name in CAPITAL LETTERS. Do not use abbreviations.</small>
               </label>
               <label>
                 Degree / designation
@@ -1527,6 +1528,7 @@ function AdminDashboard() {
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [tab, setTab] = useState("overview");
+  const [deletingRejected, setDeletingRejected] = useState(false);
   useEffect(() => {
     request("/staff/dashboard/", {}, true)
       .then(setData)
@@ -1627,14 +1629,25 @@ function AdminDashboard() {
   };
   const deleteAllRejected = async () => {
     const count = data.candidates.filter((candidate) => candidate.hiring_status === "rejected").length;
-    if (!count || !window.confirm(`Delete all ${count} rejected candidates and their files, recordings, and assessment data? This cannot be undone.`)) return;
+    if (deletingRejected || !count || !window.confirm(`Delete all ${count} rejected candidates and their files, recordings, and assessment data? This cannot be undone.`)) return;
+    setDeletingRejected(true);
     try {
-      await request("/staff/rejected/delete-all/", { method: "DELETE" }, true);
+      const result = await request("/staff/rejected/delete-all/", { method: "DELETE" }, true);
+      if (result.deleted < 1) throw new Error("No rejected candidates were deleted. Refresh the dashboard and try again.");
+
       setData((current) => ({ ...current, candidates: current.candidates.filter((candidate) => candidate.hiring_status !== "rejected") }));
       setSelected(null);
       setDetail(null);
+      // Refresh every dashboard total after the API confirms the database deletion.
+      try {
+        setData(await request("/staff/dashboard/", {}, true));
+      } catch {
+        window.alert(`${result.deleted} rejected candidate${result.deleted === 1 ? " was" : "s were"} deleted, but the dashboard totals could not be refreshed.`);
+      }
     } catch (error) {
       window.alert(error.message);
+    } finally {
+      setDeletingRejected(false);
     }
   };
   if (!data) return <Loader />;
@@ -2119,7 +2132,14 @@ function AdminDashboard() {
                   <button className="danger-action" onClick={deleteAllSelected}><Trash2 /> Delete all selected</button>
                 )}
                 {tab === "rejected" && tableCandidates.length > 0 && (
-                  <button className="danger-action" onClick={deleteAllRejected}><Trash2 /> Delete all rejected</button>
+                  <button
+                    type="button"
+                    className="danger-action"
+                    onClick={deleteAllRejected}
+                    disabled={deletingRejected}
+                  >
+                    <Trash2 /> {deletingRejected ? "Deleting rejected candidates…" : "Delete all rejected"}
+                  </button>
                 )}
                 <label>
                   <Search />
