@@ -27,6 +27,7 @@ import {
   Printer,
   RotateCcw,
   Search,
+  ScreenShare,
   ShieldCheck,
   Trash2,
   Trophy,
@@ -50,6 +51,7 @@ import "./App.css";
 
 const API = import.meta.env.VITE_API_URL || "/api";
 let activeProctorStream = null;
+let activeScreenStream = null;
 const roles = [
   ["data-analyst", "Data Analyst", "SQL, statistics & insights"],
   ["frontend-developer", "Frontend Developer", "React, JavaScript, HTML & CSS"],
@@ -146,7 +148,7 @@ async function request(path, options = {}, admin = false) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data.detail || "Something went wrong. Please try again.");
+    const error = new Error(data.detail || `Request failed (HTTP ${response.status}). Please try again.`);
     error.status = response.status;
     throw error;
   }
@@ -717,6 +719,8 @@ function Instructions() {
     if (!handoffRef.current) {
       activeProctorStream?.getTracks().forEach((track) => track.stop());
       activeProctorStream = null;
+      activeScreenStream?.getTracks().forEach((track) => track.stop());
+      activeScreenStream = null;
     }
   }, []);
   if (!meta) return <Navigate to="/portal" />;
@@ -724,16 +728,24 @@ function Instructions() {
     setPermissionLoading(true);
     setError("");
     try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("This browser does not support camera and microphone access. Use a current Chrome, Edge, or Firefox browser.");
+      if (!navigator.mediaDevices?.getUserMedia || !navigator.mediaDevices?.getDisplayMedia) {
+        throw new Error("This browser does not support the camera and screen access required for the assessment. Use a current Chrome, Edge, or Firefox browser.");
       }
       activeProctorStream?.getTracks().forEach((track) => track.stop());
+      activeScreenStream?.getTracks().forEach((track) => track.stop());
       activeProctorStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 320 }, height: { ideal: 240 } },
         audio: true,
       });
       if (!activeProctorStream.getVideoTracks().length || !activeProctorStream.getAudioTracks().length) {
         throw new Error("Both a working camera and microphone are required.");
+      }
+      activeScreenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 10, max: 15 } },
+        audio: false,
+      });
+      if (!activeScreenStream.getVideoTracks().length) {
+        throw new Error("Screen sharing is required.");
       }
       if (previewRef.current) {
         previewRef.current.srcObject = activeProctorStream;
@@ -743,8 +755,10 @@ function Instructions() {
     } catch (err) {
       activeProctorStream?.getTracks().forEach((track) => track.stop());
       activeProctorStream = null;
+      activeScreenStream?.getTracks().forEach((track) => track.stop());
+      activeScreenStream = null;
       setDevicesReady(false);
-      setError(`${err.message} Allow both permissions in your browser settings, then try again.`);
+      setError(`${err.message} Allow the requested device and screen permissions, then try again.`);
     } finally {
       setPermissionLoading(false);
     }
@@ -752,9 +766,10 @@ function Instructions() {
   const begin = async () => {
     const cameraLive = activeProctorStream?.getVideoTracks().some((track) => track.readyState === "live");
     const microphoneLive = activeProctorStream?.getAudioTracks().some((track) => track.readyState === "live");
-    if (!devicesReady || !cameraLive || !microphoneLive || !consent) {
+    const screenLive = activeScreenStream?.getVideoTracks().some((track) => track.readyState === "live");
+    if (!devicesReady || !cameraLive || !microphoneLive || !screenLive || !consent) {
       setDevicesReady(false);
-      setError("Complete the camera and microphone check and accept the assessment rules before starting.");
+      setError("Complete the camera, microphone, and screen-sharing check and accept the assessment rules before starting.");
       return;
     }
     setLoading(true);
@@ -767,6 +782,8 @@ function Instructions() {
     } catch (err) {
       activeProctorStream?.getTracks().forEach((track) => track.stop());
       activeProctorStream = null;
+      activeScreenStream?.getTracks().forEach((track) => track.stop());
+      activeScreenStream = null;
       if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
       setError(err.message);
       setLoading(false);
@@ -820,6 +837,15 @@ function Instructions() {
             </span>
           </div>
           <div>
+            <ScreenShare />
+            <span>
+              <b>Continuous screen recording</b>
+              <small>
+                Your shared screen is recorded throughout the assessment. Stopping screen sharing ends the attempt.
+              </small>
+            </span>
+          </div>
+          <div>
             <ShieldCheck />
             <span>
               <b>Automated monitoring and rejection</b>
@@ -860,16 +886,16 @@ function Instructions() {
         <section className={`device-check ${devicesReady ? "ready" : ""}`}>
           <video ref={previewRef} muted playsInline />
           <div>
-            <b>{devicesReady ? "Camera and microphone are ready" : "Permission check required"}</b>
-            <small>{devicesReady ? "Keep your face centered and remain in a quiet, well-lit room." : "Click below and choose Allow for both camera and microphone."}</small>
+            <b>{devicesReady ? "Camera, microphone, and screen are ready" : "Permission check required"}</b>
+            <small>{devicesReady ? "Keep your face centered and keep screen sharing active." : "Click below, allow camera and microphone, then choose the screen to share."}</small>
             <button className="secondary" type="button" onClick={checkDevices} disabled={permissionLoading}>
-              <Camera /> {permissionLoading ? "Checking devices…" : devicesReady ? "Check devices again" : "Allow camera & microphone"}
+              <ScreenShare /> {permissionLoading ? "Checking devices…" : devicesReady ? "Check devices again" : "Allow devices & share screen"}
             </button>
           </div>
         </section>
         <label className="rule-consent">
           <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
-          <span>I have read these rules and consent to camera/microphone recording and automated integrity checks. I understand that a violation may terminate and reject my assessment.</span>
+          <span>I have read these rules and consent to camera, microphone, and screen recording and automated integrity checks. I understand that a violation may terminate and reject my assessment.</span>
         </label>
         {error && <div className="error-box">{error}</div>}
         <button className="primary wide" onClick={begin} disabled={loading || !devicesReady || !consent}>
@@ -905,8 +931,8 @@ function Assessment() {
   const [mediaError, setMediaError] = useState("");
   const submitting = useRef(false);
   const videoRef = useRef(null);
-  const recorderRef = useRef(null);
-  const uploadChainRef = useRef(Promise.resolve());
+  const recorderRef = useRef({ camera: null, screen: null });
+  const uploadChainRef = useRef({ camera: Promise.resolve(), screen: Promise.resolve() });
   const load = useCallback(async () => {
     try {
       const data = await request(`/rounds/${type}/state/`);
@@ -963,9 +989,10 @@ function Assessment() {
   useEffect(() => {
     let cancelled = false;
     let faceTimer;
+    const recorders = recorderRef.current;
     const token = localStorage.getItem("candidateToken");
-    const uploadChunk = (recordingId, sequence, blob) => {
-      uploadChainRef.current = uploadChainRef.current
+    const uploadChunk = (kind, recordingId, sequence, blob) => {
+      uploadChainRef.current[kind] = uploadChainRef.current[kind]
         .then(() => fetch(`${API}/proctor/recordings/${recordingId}/chunks/?sequence=${sequence}`, {
           method: "POST",
           headers: { "Content-Type": "application/octet-stream", Authorization: `Bearer ${token}` },
@@ -976,41 +1003,58 @@ function Assessment() {
         })
         .catch(() => setMediaError("The proctor recording connection was interrupted."));
     };
+    const startRecorder = async (kind, stream, mimeType) => {
+      const started = await request("/proctor/recordings/start/", {
+        method: "POST", body: JSON.stringify({ kind, mime_type: mimeType }),
+      });
+      let sequence = 0;
+      const options = kind === "screen"
+        ? { mimeType, videoBitsPerSecond: 600000 }
+        : { mimeType, videoBitsPerSecond: 180000, audioBitsPerSecond: 24000 };
+      const recorder = new MediaRecorder(stream, options);
+      recorders[kind] = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) uploadChunk(kind, started.id, sequence++, event.data);
+      };
+      recorder.onstop = () => {
+        uploadChainRef.current[kind].finally(() => request(`/proctor/recordings/${started.id}/finish/`, { method: "POST" }).catch(() => {}));
+      };
+      recorder.start(15000);
+    };
     const startMedia = async () => {
       try {
         const stream = activeProctorStream?.active
           ? activeProctorStream
           : await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const screenStream = activeScreenStream?.active
+          ? activeScreenStream
+          : await navigator.mediaDevices.getDisplayMedia({
+              video: { frameRate: { ideal: 10, max: 15 } }, audio: false,
+            });
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
+          screenStream.getTracks().forEach((track) => track.stop());
           return;
         }
         activeProctorStream = stream;
+        activeScreenStream = screenStream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play().catch(() => {});
         }
         stream.getVideoTracks().forEach((track) => track.addEventListener("ended", () => !cancelled && logEvent("camera_disabled"), { once: true }));
         stream.getAudioTracks().forEach((track) => track.addEventListener("ended", () => !cancelled && logEvent("microphone_disabled"), { once: true }));
+        screenStream.getVideoTracks().forEach((track) => track.addEventListener("ended", () => !cancelled && logEvent("screen_share_stopped"), { once: true }));
         const mimeType = ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"].find(
           (value) => window.MediaRecorder?.isTypeSupported(value),
         );
         if (!window.MediaRecorder || !mimeType) throw new Error("This browser cannot create the required assessment recording.");
-        const started = await request("/proctor/recordings/start/", {
-          method: "POST", body: JSON.stringify({ mime_type: mimeType }),
-        });
-        let sequence = 0;
-        const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 180000, audioBitsPerSecond: 24000 });
-        recorderRef.current = recorder;
-        recorder.ondataavailable = (event) => {
-          if (event.data.size) uploadChunk(started.id, sequence++, event.data);
-        };
-        recorder.onstop = () => {
-          uploadChainRef.current.finally(() => request(`/proctor/recordings/${started.id}/finish/`, { method: "POST" }).catch(() => {}));
-        };
         // Larger intervals substantially reduce API and database writes when a
         // full campus cohort is taking the assessment simultaneously.
-        recorder.start(15000);
+        await Promise.all([
+          startRecorder("camera", stream, mimeType),
+          startRecorder("screen", screenStream, mimeType),
+        ]);
         if ("FaceDetector" in window) {
           const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 3 });
           faceTimer = setInterval(async () => {
@@ -1023,17 +1067,21 @@ function Assessment() {
           }, 10000);
         }
       } catch (mediaIssue) {
-        setMediaError(mediaIssue.message || "Camera and microphone permission is required.");
-        logEvent("camera_disabled");
+        setMediaError(mediaIssue.message || "Camera, microphone, and screen sharing are required.");
+        logEvent(activeScreenStream?.active ? "camera_disabled" : "screen_share_stopped");
       }
     };
     startMedia();
     return () => {
       cancelled = true;
       clearInterval(faceTimer);
-      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+      Object.values(recorders).forEach((recorder) => {
+        if (recorder?.state === "recording") recorder.stop();
+      });
       activeProctorStream?.getTracks().forEach((track) => track.stop());
       activeProctorStream = null;
+      activeScreenStream?.getTracks().forEach((track) => track.stop());
+      activeScreenStream = null;
     };
   }, [type, logEvent]);
   useEffect(() => {
@@ -1218,7 +1266,7 @@ function Assessment() {
           <ShieldCheck size={16} />
           {state.violations} violations
         </div>
-        <div className="proctor-live" title="Camera and microphone recording active">
+        <div className="proctor-live" title="Camera, microphone, and screen recording active">
           <video ref={(node) => {
             videoRef.current = node;
             if (node && activeProctorStream) {
@@ -1405,8 +1453,8 @@ function Assessment() {
           <div>
             <Camera />
             <span>
-              <b>Camera and microphone are required</b>
-              <small>Your assessment session is recorded and checked for integrity. Denying or disabling either device ends the attempt.</small>
+              <b>Camera, microphone, and screen sharing are required</b>
+              <small>Your camera, microphone, and screen are recorded and checked for integrity. Disabling any required stream ends the attempt.</small>
             </span>
           </div>
         </div>
@@ -1631,9 +1679,18 @@ function AdminDashboard() {
     const count = data.candidates.filter((candidate) => candidate.hiring_status === "rejected").length;
     if (deletingRejected || !count || !window.confirm(`Delete all ${count} rejected candidates and their files, recordings, and assessment data? This cannot be undone.`)) return;
     setDeletingRejected(true);
+    let deleted = 0;
     try {
-      const result = await request("/staff/rejected/delete-all/", { method: "DELETE" }, true);
-      if (result.deleted < 1) throw new Error("No rejected candidates were deleted. Refresh the dashboard and try again.");
+      let remaining;
+      do {
+        const result = await request("/staff/rejected/delete-all/?limit=10", { method: "DELETE" }, true);
+        deleted += result.deleted;
+        remaining = result.remaining;
+        if (result.deleted < 1 && remaining > 0) {
+          throw new Error("Rejected candidates could not be deleted. Refresh the dashboard and try again.");
+        }
+      } while (remaining > 0);
+      if (deleted < 1) throw new Error("No rejected candidates were deleted. Refresh the dashboard and try again.");
 
       setData((current) => ({ ...current, candidates: current.candidates.filter((candidate) => candidate.hiring_status !== "rejected") }));
       setSelected(null);
@@ -1642,10 +1699,13 @@ function AdminDashboard() {
       try {
         setData(await request("/staff/dashboard/", {}, true));
       } catch {
-        window.alert(`${result.deleted} rejected candidate${result.deleted === 1 ? " was" : "s were"} deleted, but the dashboard totals could not be refreshed.`);
+        window.alert(`${deleted} rejected candidate${deleted === 1 ? " was" : "s were"} deleted, but the dashboard totals could not be refreshed.`);
       }
     } catch (error) {
-      window.alert(error.message);
+      if (deleted > 0) {
+        request("/staff/dashboard/", {}, true).then(setData).catch(() => {});
+      }
+      window.alert(deleted > 0 ? `${deleted} rejected candidates were deleted before the request stopped. ${error.message}` : error.message);
     } finally {
       setDeletingRejected(false);
     }
@@ -2469,7 +2529,7 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             <div className="recording-list">
               {detail.recordings.map((recording) => (
                 <div key={recording.id}>
-                  <span><Video /><b>{roundMeta[recording.round]?.title || recording.round}</b><small>{Math.round(recording.size / 1024)} KB · {recording.completed_at ? "Complete" : "Processing"}</small></span>
+                  <span><Video /><b>{recording.kind === "screen" ? "Screen" : "Camera & microphone"} · {roundMeta[recording.round]?.title || recording.round}</b><small>{Math.round(recording.size / 1024)} KB · {recording.completed_at ? "Complete" : "Processing"}</small></span>
                   {!recordingUrls[recording.id] ? (
                     <button className="secondary" onClick={() => viewRecording(recording)}><Play /> View recording</button>
                   ) : (

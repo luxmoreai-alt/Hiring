@@ -334,12 +334,14 @@ class AssessmentFlowTests(TestCase):
         self.assertTrue(Candidate.objects.filter(id=kept.id).exists())
 
     def test_staff_can_bulk_delete_only_rejected_candidates(self):
-        Candidate.objects.create(name="Rejected", email="rejected@example.com", phone="9999999999", college="C", designation="B", address="X", role="data-analyst", hiring_status="rejected")
+        for index in range(3):
+            Candidate.objects.create(name=f"Rejected {index}", email=f"rejected{index}@example.com", phone=f"999999999{index}", college="C", designation="B", address="X", role="data-analyst", hiring_status="rejected")
         kept = Candidate.objects.create(name="Selected", email="selected-kept@example.com", phone="8888888888", college="C", designation="B", address="X", role="data-analyst", hiring_status="selected")
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
-        response = self.client.delete("/api/staff/rejected/delete-all/")
+        response = self.client.delete("/api/staff/rejected/delete-all/?limit=2")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["deleted"], 1)
+        self.assertEqual(response.data["deleted"], 2)
+        self.assertEqual(response.data["remaining"], 1)
         self.assertTrue(Candidate.objects.filter(id=kept.id).exists())
 
     def test_leaving_exam_terminates_and_locks_access(self):
@@ -362,7 +364,7 @@ class AssessmentFlowTests(TestCase):
     def test_proctor_recording_is_uploaded_in_admin_playback_chunks(self):
         self.register_candidate()
         self.client.post("/api/rounds/aptitude/start/", {}, format="json")
-        started = self.client.post("/api/proctor/recordings/start/", {"mime_type": "video/webm"}, format="json")
+        started = self.client.post("/api/proctor/recordings/start/", {"mime_type": "video/webm", "kind": "screen"}, format="json")
         self.assertEqual(started.status_code, 201)
         chunk = self.client.post(
             f"/api/proctor/recordings/{started.data['id']}/chunks/?sequence=0",
@@ -370,12 +372,19 @@ class AssessmentFlowTests(TestCase):
         )
         self.assertEqual(chunk.status_code, 200)
         recording = ProctorRecording.objects.get(id=started.data["id"])
+        self.assertEqual(recording.kind, "screen")
         self.assertEqual(recording.chunk_count, 1)
         self.assertEqual(recording.total_size, len(b"webm-segment"))
         self.client.post(f"/api/proctor/recordings/{started.data['id']}/finish/", {}, format="json")
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
         playback = self.client.get(f"/api/staff/recordings/{started.data['id']}/?sequence=0")
         self.assertEqual(playback.content, b"webm-segment")
+
+    def test_proctor_recording_rejects_unknown_kind(self):
+        self.register_candidate()
+        self.client.post("/api/rounds/aptitude/start/", {}, format="json")
+        response = self.client.post("/api/proctor/recordings/start/", {"kind": "unknown"}, format="json")
+        self.assertEqual(response.status_code, 400)
 
     def test_staff_reset_preserves_previous_attempt_and_allows_retake(self):
         registration = self.register_candidate()

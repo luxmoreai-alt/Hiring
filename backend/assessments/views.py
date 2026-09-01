@@ -142,6 +142,7 @@ def candidate_data(candidate, detailed=False, include_results=False):
         } for h in candidate.status_history.select_related("changed_by").all()]
         data["recordings"] = [{
             "id": recording.id, "round": recording.attempt.round_type,
+            "kind": recording.kind,
             "started_at": recording.started_at, "completed_at": recording.completed_at,
             "size": recording.total_size, "chunks": recording.chunk_count,
             "mime_type": recording.mime_type,
@@ -489,6 +490,7 @@ def proctor_event(request):
             "multiple_faces": "Automated camera monitoring detected more than one face.",
             "camera_disabled": "Camera access or the camera stream was disabled during the assessment.",
             "microphone_disabled": "Microphone access or the microphone stream was disabled during the assessment.",
+            "screen_share_stopped": "Candidate stopped sharing their screen during the assessment.",
         }
         repeated_face_missing = event_type == "face_missing" and candidate.proctor_events.filter(
             attempt=attempt, event_type="face_missing"
@@ -530,7 +532,10 @@ def recording_start(request):
     if not attempt:
         return ApiResponse({"detail": "No active assessment to record."}, status=409)
     mime_type = str(request.data.get("mime_type", "video/webm"))[:100]
-    recording = ProctorRecording.objects.create(candidate=candidate, attempt=attempt, mime_type=mime_type)
+    kind = str(request.data.get("kind", "camera"))
+    if kind not in {value for value, _ in ProctorRecording.KIND_CHOICES}:
+        return ApiResponse({"detail": "Invalid recording type."}, status=400)
+    recording = ProctorRecording.objects.create(candidate=candidate, attempt=attempt, kind=kind, mime_type=mime_type)
     return ApiResponse({"id": recording.id}, status=201)
 
 
@@ -658,10 +663,26 @@ def admin_selected_delete_all(request):
 @api_view(["DELETE"])
 def admin_rejected_delete_all(request):
     require_admin(request)
-    queryset = Candidate.objects.filter(hiring_status="rejected")
-    count = queryset.count()
-    queryset.delete()
-    return ApiResponse({"deleted": count})
+    try:
+        batch_size = min(max(int(request.query_params.get("limit", "10")), 1), 50)
+    except ValueError:
+        return ApiResponse({"detail": "Invalid deletion batch size."}, status=400)
+
+    # Recording chunks contain binary video and can make a single cascade too
+    # large for a serverless request. Remove a bounded batch, deleting the
+    # binary leaves directly before Django collects the remaining relations.
+    candidate_ids = list(
+        Candidate.objects.filter(hiring_status="rejected")
+        .order_by("id").values_list("id", flat=True)[:batch_size]
+    )
+    if candidate_ids:
+        with transaction.atomic():
+            ProctorRecordingChunk.objects.filter(
+                recording__candidate_id__in=candidate_ids
+            ).delete()
+            Candidate.objects.filter(id__in=candidate_ids, hiring_status="rejected").delete()
+    remaining = Candidate.objects.filter(hiring_status="rejected").count()
+    return ApiResponse({"deleted": len(candidate_ids), "remaining": remaining})
 
 
 @api_view(["POST"])

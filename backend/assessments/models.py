@@ -148,8 +148,10 @@ class AssessmentReset(models.Model):
 
 
 class ProctorRecording(models.Model):
+    KIND_CHOICES = [("camera", "Camera and microphone"), ("screen", "Screen")]
     candidate = models.ForeignKey(Candidate, related_name="proctor_recordings", on_delete=models.CASCADE)
     attempt = models.ForeignKey(Attempt, related_name="recordings", on_delete=models.CASCADE)
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default="camera")
     mime_type = models.CharField(max_length=100, default="video/webm")
     started_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
