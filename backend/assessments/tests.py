@@ -11,7 +11,9 @@ from unittest.mock import patch
 
 from .auth import make_token
 from .emails import send_completion_email, send_registration_email
-from .models import AssessmentReset, Attempt, Candidate, CandidateStatusHistory, ProctorRecording, Question
+from .models import (AssessmentReset, Attempt, Candidate, CandidateStatusHistory,
+                     ProctorEvent, ProctorRecording, ProctorRecordingChunk,
+                     Question, Response)
 from .runner import _judge0_languages_cache, available_languages, run_code
 from .views import ROUND_PASS_SCORES, advance, evaluate_react_solution, public_question
 
@@ -319,11 +321,27 @@ class AssessmentFlowTests(TestCase):
 
     def test_staff_can_delete_candidate(self):
         candidate = Candidate.objects.create(name="Delete Me", email="delete@example.com", phone="99999999", college="C", designation="B.Tech", address="X", role="data-analyst")
+        question = Question.objects.first()
+        attempt = Attempt.objects.create(candidate=candidate, round_type="aptitude", question_ids=[question.id])
+        Response.objects.create(attempt=attempt, question=question)
+        ProctorEvent.objects.create(candidate=candidate, attempt=attempt, event_type="tab_hidden")
+        CandidateStatusHistory.objects.create(candidate=candidate, to_status="on_hold")
+        AssessmentReset.objects.create(candidate=candidate, assessment_cycle=1, status_before_reset="aptitude")
+        recording = ProctorRecording.objects.create(candidate=candidate, attempt=attempt, kind="screen")
+        ProctorRecordingChunk.objects.create(recording=recording, sequence=0, data=b"screen-video")
+        related_ids = {"attempt": attempt.id, "recording": recording.id}
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
         response = self.client.delete(f"/api/staff/candidates/{candidate.id}/delete/")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["deleted"])
         self.assertFalse(Candidate.objects.filter(id=candidate.id).exists())
+        self.assertFalse(Attempt.objects.filter(id=related_ids["attempt"]).exists())
+        self.assertFalse(Response.objects.filter(attempt_id=related_ids["attempt"]).exists())
+        self.assertFalse(ProctorEvent.objects.filter(candidate_id=candidate.id).exists())
+        self.assertFalse(CandidateStatusHistory.objects.filter(candidate_id=candidate.id).exists())
+        self.assertFalse(AssessmentReset.objects.filter(candidate_id=candidate.id).exists())
+        self.assertFalse(ProctorRecording.objects.filter(id=related_ids["recording"]).exists())
+        self.assertFalse(ProctorRecordingChunk.objects.filter(recording_id=related_ids["recording"]).exists())
 
     def test_staff_can_bulk_delete_only_selected_candidates(self):
         Candidate.objects.create(name="Selected", email="selected@example.com", phone="9999999999", college="C", designation="B", address="X", role="data-analyst", hiring_status="selected")

@@ -17,6 +17,7 @@ from rest_framework.response import Response as ApiResponse
 from rest_framework import status
 
 from .auth import make_token, read_token
+from .deletion import delete_candidates
 from .emails import send_completion_email, send_registration_email
 from .models import (AssessmentReset, Attempt, Candidate, CandidateStatusHistory,
                      ProctorEvent, ProctorRecording, ProctorRecordingChunk,
@@ -646,17 +647,16 @@ def admin_recording(request, recording_id):
 @api_view(["DELETE"])
 def admin_candidate_delete(request, candidate_id):
     require_admin(request)
-    candidate = get_object_or_404(Candidate, id=candidate_id)
-    candidate.delete()
+    deleted = delete_candidates(Candidate.objects.filter(id=candidate_id))
+    if not deleted:
+        return ApiResponse({"detail": "Not found."}, status=404)
     return ApiResponse({"deleted": True})
 
 
 @api_view(["DELETE"])
 def admin_selected_delete_all(request):
     require_admin(request)
-    queryset = Candidate.objects.filter(hiring_status="selected")
-    count = queryset.count()
-    queryset.delete()
+    count = delete_candidates(Candidate.objects.filter(hiring_status="selected"))
     return ApiResponse({"deleted": count})
 
 
@@ -668,21 +668,11 @@ def admin_rejected_delete_all(request):
     except ValueError:
         return ApiResponse({"detail": "Invalid deletion batch size."}, status=400)
 
-    # Recording chunks contain binary video and can make a single cascade too
-    # large for a serverless request. Remove a bounded batch, deleting the
-    # binary leaves directly before Django collects the remaining relations.
-    candidate_ids = list(
-        Candidate.objects.filter(hiring_status="rejected")
-        .order_by("id").values_list("id", flat=True)[:batch_size]
+    deleted = delete_candidates(
+        Candidate.objects.filter(hiring_status="rejected"), limit=batch_size
     )
-    if candidate_ids:
-        with transaction.atomic():
-            ProctorRecordingChunk.objects.filter(
-                recording__candidate_id__in=candidate_ids
-            ).delete()
-            Candidate.objects.filter(id__in=candidate_ids, hiring_status="rejected").delete()
     remaining = Candidate.objects.filter(hiring_status="rejected").count()
-    return ApiResponse({"deleted": len(candidate_ids), "remaining": remaining})
+    return ApiResponse({"deleted": deleted, "remaining": remaining})
 
 
 @api_view(["POST"])
