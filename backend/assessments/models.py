@@ -14,6 +14,12 @@ class Candidate(models.Model):
     ]
     STATUS_CHOICES = [("registered", "Registered"), ("aptitude", "Aptitude"), ("technical", "Technical"), ("coding", "Coding"), ("completed", "Completed")]
     LOCATION_CHOICES = [("not_provided", "Not provided"), ("chennai", "Chennai"), ("bengaluru", "Bengaluru"), ("hyderabad", "Hyderabad")]
+    GENDER_CHOICES = [
+        ("male", "Male"),
+        ("female", "Female"),
+        ("other", "Other"),
+        ("prefer_not_say", "Prefer not to say"),
+    ]
     HIRING_STATUS_CHOICES = [
         ("assessment_pending", "Assessment pending"),
         ("assessment_completed", "Assessment completed"),
@@ -32,6 +38,7 @@ class Candidate(models.Model):
     college = models.CharField(max_length=200)
     college_normalized = models.CharField(max_length=200, blank=True, db_index=True)
     designation = models.CharField(max_length=120, help_text="Degree, department, or current designation")
+    gender = models.CharField(max_length=20, choices=GENDER_CHOICES, default="prefer_not_say")
     address = models.TextField()
     role = models.CharField(max_length=40, choices=ROLE_CHOICES)
     preferred_location = models.CharField(max_length=20, choices=LOCATION_CHOICES, default="not_provided")

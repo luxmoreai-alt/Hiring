@@ -31,7 +31,7 @@ class AssessmentFlowTests(TestCase):
             "name": "Test Student", "email": "student@example.com", "phone": "9876543210",
             "college": "Example Institute", "designation": "B.Tech CSE",
             "address": "12 Example Road, Hyderabad 500001", "address_confirmed": "true",
-            "role": "mern-stack-developer", "preferred_location": "hyderabad",
+            "gender": "male", "role": "mern-stack-developer", "preferred_location": "hyderabad",
         }, format="json")
         self.assertEqual(response.status_code, 201)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['token']}")
@@ -74,6 +74,8 @@ class AssessmentFlowTests(TestCase):
         candidate = Candidate.objects.get(id=registration["candidate"]["id"])
         self.assertEqual(candidate.college, "EXAMPLE INSTITUTE")
         self.assertEqual(registration["candidate"]["college"], "EXAMPLE INSTITUTE")
+        self.assertEqual(candidate.gender, "male")
+        self.assertEqual(registration["candidate"]["gender_label"], "Male")
 
     def test_duplicate_answer_returns_current_state_without_error(self):
         registration = self.register_candidate()
@@ -137,7 +139,7 @@ class AssessmentFlowTests(TestCase):
             "name": "Test Student", "email": "student@example.com", "phone": "9876543210",
             "college": "Example Institute", "designation": "B.Tech CSE",
             "address": "12 Example Road, Hyderabad 500001", "address_confirmed": True,
-            "role": "mern-stack-developer", "preferred_location": "hyderabad",
+            "gender": "male", "role": "mern-stack-developer", "preferred_location": "hyderabad",
         }, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["resumed"])
@@ -159,7 +161,7 @@ class AssessmentFlowTests(TestCase):
             "name": "Test Student", "email": "student@example.com", "phone": "9876543210",
             "college": "Example Institute", "designation": "B.Tech CSE",
             "address": "12 Example Road, Hyderabad 500001", "address_confirmed": True,
-            "role": "mern-stack-developer", "preferred_location": "hyderabad",
+            "gender": "female", "role": "mern-stack-developer", "preferred_location": "hyderabad",
         }, format="json")
 
         self.assertEqual(response.status_code, 200)
@@ -189,7 +191,7 @@ class AssessmentFlowTests(TestCase):
             "name": "Luxmore Test", "email": candidate.email, "phone": "9884050511",
             "college": candidate.college, "designation": candidate.designation,
             "address": "12 Test Road, Chennai 600001", "address_confirmed": True,
-            "role": candidate.role, "preferred_location": "chennai",
+            "gender": "prefer_not_say", "role": candidate.role, "preferred_location": "chennai",
         }, format="json")
         candidate.refresh_from_db()
         self.assertEqual(response.status_code, 200)

@@ -60,6 +60,7 @@ def candidate_data(candidate, detailed=False, include_results=False):
     data = {
         "id": str(candidate.id), "name": candidate.name, "email": candidate.email,
         "phone": candidate.phone, "college": candidate.college, "designation": candidate.designation,
+        "gender": candidate.gender, "gender_label": candidate.get_gender_display(),
         "address": candidate.address, "role": candidate.role, "role_label": candidate.get_role_display(),
         "preferred_location": candidate.preferred_location, "preferred_location_label": candidate.get_preferred_location_display(),
         "status": candidate.status, "hiring_status": candidate.hiring_status,
@@ -191,7 +192,7 @@ def health(request):
 
 @api_view(["POST"])
 def register(request):
-    required = ["name", "email", "phone", "college", "designation", "address", "role", "preferred_location"]
+    required = ["name", "email", "phone", "college", "designation", "gender", "address", "role", "preferred_location"]
     missing = [field for field in required if not str(request.data.get(field, "")).strip()]
     if missing:
         return ApiResponse({"detail": f"Required fields: {', '.join(missing)}"}, status=400)
@@ -212,6 +213,8 @@ def register(request):
         return ApiResponse({"detail": "Please select a valid role"}, status=400)
     if request.data["preferred_location"] not in dict(Candidate.LOCATION_CHOICES):
         return ApiResponse({"detail": "Please select a valid preferred work location"}, status=400)
+    if request.data["gender"] not in dict(Candidate.GENDER_CHOICES):
+        return ApiResponse({"detail": "Please select a valid gender option"}, status=400)
     college = " ".join(str(request.data["college"]).split()).upper()
     college_key = normalized_college(college)
     canonical = Candidate.objects.filter(college_normalized=college_key).exclude(college="").values_list("college", flat=True).first()
@@ -257,7 +260,7 @@ def register(request):
                     existing.ai_rejection_reason = ""
                     existing.ai_rejected_at = None
                     existing.save(update_fields=[
-                        "name", "phone", "college", "college_normalized", "designation",
+                        "name", "phone", "college", "college_normalized", "designation", "gender",
                         "address", "role", "preferred_location", "assessment_cycle",
                         "status", "access_locked", "completed_at", "hiring_status",
                         "hiring_status_updated_at", "ai_rejection_reason", "ai_rejected_at",

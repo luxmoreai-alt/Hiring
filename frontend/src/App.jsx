@@ -165,6 +165,7 @@ function Landing() {
     phone: "",
     college: "",
     designation: "",
+    gender: "",
     address: "",
     role: "",
     preferred_location: "",
@@ -245,7 +246,7 @@ function Landing() {
           <ShieldCheck size={17} />
           <span>
             <b>Secure assessment</b>
-            <small>Proctored & time-bound</small>
+            <small>Structured & time-bound</small>
           </span>
         </div>
         </section>
@@ -315,6 +316,16 @@ function Landing() {
                 />
               </label>
             </div>
+            <label>
+              Gender
+              <select required value={form.gender} onChange={set("gender")}>
+                <option value="">Select gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+                <option value="prefer_not_say">Prefer not to say</option>
+              </select>
+            </label>
             <label>
               Permanent address (as per Aadhaar)
               <textarea
@@ -1346,7 +1357,7 @@ function AdminDashboard() {
   };
   const downloadReport = () => {
     const columns = [
-      "Student name", "Email", "Phone", "College", "Degree / designation", "Role",
+      "Student name", "Email", "Phone", "Gender", "College", "Degree / designation", "Role",
       "Preferred location", "Hiring status", "Assessment status", "Registered at",
     ];
     const csvCell = (value) => {
@@ -1356,7 +1367,7 @@ function AdminDashboard() {
     };
     const lines = reportCandidates.map((candidate) => {
       return [
-        candidate.name, candidate.email, candidate.phone, candidate.college,
+        candidate.name, candidate.email, candidate.phone, candidate.gender_label, candidate.college,
         candidate.designation, candidate.role_label, candidate.preferred_location_label,
         candidate.hiring_status_label, candidate.status,
         candidate.registered_at ? new Date(candidate.registered_at).toLocaleString() : "",
@@ -1622,12 +1633,13 @@ function AdminDashboard() {
                 <div className="table-scroll report-table">
                   <table>
                     <thead>
-                      <tr><th>Student</th><th>College</th><th>Role</th><th>Result</th><th>Assessment</th><th>Details</th></tr>
+                      <tr><th>Student</th><th>Gender</th><th>College</th><th>Role</th><th>Result</th><th>Assessment</th><th>Details</th></tr>
                     </thead>
                     <tbody>
                       {reportCandidates.map((candidate) => (
                         <tr key={candidate.id}>
                           <td><div className="person"><span>{candidate.name[0]}</span><div><b>{candidate.name}</b><small>{candidate.email} · {candidate.phone}</small></div></div></td>
+                          <td>{candidate.gender_label}</td>
                           <td>{candidate.college}<br /><small>{candidate.designation}</small></td>
                           <td>{candidate.role_label}<br /><small>{candidate.preferred_location_label}</small></td>
                           <td><span className={`report-result ${candidate.hiring_status}`}>{candidate.hiring_status_label}</span></td>
@@ -1752,6 +1764,7 @@ function AdminDashboard() {
                 <thead>
                   <tr>
                     <th>Candidate</th>
+                    <th>Gender</th>
                     <th>Role</th>
                     <th>Location</th>
                     <th>Hiring status</th>
@@ -1771,6 +1784,7 @@ function AdminDashboard() {
                           </div>
                         </div>
                       </td>
+                      <td>{c.gender_label}</td>
                       <td>
                         <span className="role-tag">{c.role_label}</span>
                       </td>
@@ -1879,7 +1893,10 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
           <p>
             {candidate.email} · {candidate.phone}
           </p>
-          <i>{candidate.role_label}</i>
+          <div className="drawer-badges">
+            <i>{candidate.role_label}</i>
+            <i className="gender-badge">Gender: {candidate.gender_label || "Not provided"}</i>
+          </div>
         </div>
         <div className="detail-grid">
           <div>
