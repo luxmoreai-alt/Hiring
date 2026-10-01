@@ -1,7 +1,6 @@
 from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core import mail
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase, override_settings
@@ -15,7 +14,7 @@ from .models import (AssessmentReset, Attempt, Candidate, CandidateStatusHistory
                      ProctorEvent, ProctorRecording, ProctorRecordingChunk,
                      Question, Response)
 from .runner import _judge0_languages_cache, available_languages, run_code
-from .views import ROUND_PASS_SCORES, advance, evaluate_react_solution, public_question
+from .views import advance, evaluate_react_solution, public_question
 
 
 class AssessmentFlowTests(TestCase):
@@ -28,13 +27,12 @@ class AssessmentFlowTests(TestCase):
         self.client = APIClient()
 
     def register_candidate(self):
-        resume = SimpleUploadedFile("Original Resume.pdf", b"%PDF-1.4 test resume", content_type="application/pdf")
         response = self.client.post("/api/candidates/register/", {
             "name": "Test Student", "email": "student@example.com", "phone": "9876543210",
             "college": "Example Institute", "designation": "B.Tech CSE",
             "address": "12 Example Road, Hyderabad 500001", "address_confirmed": "true",
-            "role": "mern-stack-developer", "preferred_location": "hyderabad", "resume": resume,
-        }, format="multipart")
+            "role": "mern-stack-developer", "preferred_location": "hyderabad",
+        }, format="json")
         self.assertEqual(response.status_code, 201)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['token']}")
         return response.data
@@ -68,7 +66,7 @@ class AssessmentFlowTests(TestCase):
             "question_id": question.id, "selected_option": question.correct_option,
         }, format="json")
         self.assertEqual(answered.status_code, 200)
-        self.assertEqual(answered.data["state"]["score"], 1)
+        self.assertNotIn("score", answered.data["state"])
         self.assertEqual(answered.data["state"]["current"], 1)
 
     def test_registration_stores_college_name_in_capital_letters(self):
@@ -91,57 +89,23 @@ class AssessmentFlowTests(TestCase):
         candidate = Candidate.objects.get(id=registration["candidate"]["id"])
         self.assertEqual(candidate.attempts.get(round_type="aptitude").responses.count(), 1)
 
-    def test_each_round_rejects_below_its_required_score(self):
-        round_details = {
-            "aptitude": ("aptitude", Decimal("60")),
-            "technical": ("technical", Decimal("20")),
-            "coding": ("coding", Decimal("20")),
-        }
-        for index, (round_type, (candidate_status, max_score)) in enumerate(round_details.items()):
-            with self.subTest(round_type=round_type):
-                candidate = Candidate.objects.create(
-                    name=f"Failed {round_type}", email=f"failed-{index}@example.com",
-                    phone=f"98765432{index:02d}", college="Example Institute",
-                    designation="B.Tech", address="Chennai", role="mern-stack-developer",
-                    status=candidate_status,
-                )
-                attempt = Attempt.objects.create(
-                    candidate=candidate, round_type=round_type, question_ids=[1],
-                    score=ROUND_PASS_SCORES[round_type] - 1, max_score=max_score,
-                )
-
-                advance(attempt)
-                candidate.refresh_from_db()
-
-                self.assertEqual(candidate.hiring_status, "rejected")
-                self.assertEqual(candidate.status, round_type)
-                self.assertIn("minimum score", candidate.ai_rejection_reason.lower())
-                self.assertTrue(CandidateStatusHistory.objects.filter(
-                    candidate=candidate, to_status="rejected",
-                ).exists())
-
-                self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(candidate.id)}")
-                next_round = "technical" if round_type == "aptitude" else "coding"
-                blocked = self.client.post(f"/api/rounds/{next_round}/start/", {}, format="json")
-                self.assertEqual(blocked.status_code, 423)
-
-    def test_score_equal_to_threshold_advances_candidate(self):
+    def test_every_completed_round_advances_without_a_score_threshold(self):
         cases = [
-            ("aptitude", "aptitude", "technical", "assessment_pending", Decimal("60")),
-            ("technical", "technical", "coding", "assessment_pending", Decimal("20")),
-            ("coding", "coding", "completed", "assessment_completed", Decimal("20")),
+            ("aptitude", "aptitude", "technical", "assessment_pending"),
+            ("technical", "technical", "coding", "assessment_pending"),
+            ("coding", "coding", "completed", "assessment_completed"),
         ]
-        for index, (round_type, starting_status, expected_status, expected_hiring, max_score) in enumerate(cases):
+        for index, (round_type, starting_status, expected_status, expected_hiring) in enumerate(cases):
             with self.subTest(round_type=round_type):
                 candidate = Candidate.objects.create(
-                    name=f"Passed {round_type}", email=f"passed-{index}@example.com",
+                    name=f"Completed {round_type}", email=f"completed-{index}@example.com",
                     phone=f"97654321{index:02d}", college="Example Institute",
                     designation="B.Tech", address="Chennai", role="mern-stack-developer",
                     status=starting_status,
                 )
                 attempt = Attempt.objects.create(
                     candidate=candidate, round_type=round_type, question_ids=[1],
-                    score=ROUND_PASS_SCORES[round_type], max_score=max_score,
+                    score=Decimal("0"), max_score=Decimal("20"),
                 )
 
                 advance(attempt)
@@ -149,6 +113,9 @@ class AssessmentFlowTests(TestCase):
 
                 self.assertEqual(candidate.status, expected_status)
                 self.assertEqual(candidate.hiring_status, expected_hiring)
+                self.assertFalse(CandidateStatusHistory.objects.filter(
+                    candidate=candidate, to_status="rejected",
+                ).exists())
 
     def test_stale_coding_requests_return_conflict_instead_of_not_found(self):
         self.register_candidate()
@@ -175,30 +142,6 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["resumed"])
         self.assertEqual(response.data["candidate"]["id"], first["candidate"]["id"])
-
-    def test_registration_rejects_images_and_oversized_resumes(self):
-        base = {
-            "name": "Resume Test", "email": "resume@example.com", "phone": "9876543210",
-            "college": "Example College", "designation": "B.Tech",
-            "address": "1 College Road, Chennai 600001", "address_confirmed": "true",
-            "role": "data-analyst", "preferred_location": "chennai",
-        }
-        image = self.client.post("/api/candidates/register/", {
-            **base, "resume": SimpleUploadedFile("photo.png", b"\x89PNG test", content_type="image/png"),
-        }, format="multipart")
-        self.assertEqual(image.status_code, 400)
-        huge = self.client.post("/api/candidates/register/", {
-            **base, "resume": SimpleUploadedFile("resume.pdf", b"%PDF-" + b"x" * (3 * 1024 * 1024), content_type="application/pdf"),
-        }, format="multipart")
-        self.assertEqual(huge.status_code, 400)
-
-    def test_admin_downloads_resume_with_original_filename(self):
-        registered = self.register_candidate()
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
-        response = self.client.get(f"/api/staff/candidates/{registered['candidate']['id']}/resume/")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("Original%20Resume.pdf", response["Content-Disposition"])
-        self.assertEqual(response.content, b"%PDF-1.4 test resume")
 
     def test_college_names_are_normalized_for_filtering(self):
         first = Candidate.objects.create(name="A", email="college-a@example.com", phone="9999999999", college="Example   INSTITUTE", designation="B", address="X", role="data-analyst")
@@ -361,48 +304,6 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(response.data["deleted"], 2)
         self.assertEqual(response.data["remaining"], 1)
         self.assertTrue(Candidate.objects.filter(id=kept.id).exists())
-
-    def test_leaving_exam_terminates_and_locks_access(self):
-        self.register_candidate()
-        started = self.client.post("/api/rounds/aptitude/start/", {}, format="json")
-        exited = self.client.post("/api/proctor/events/", {
-            "event_type": "fullscreen_exit", "details": {"path": "/assessment/aptitude"},
-        }, format="json")
-        self.assertEqual(exited.status_code, 200)
-        self.assertTrue(exited.data["access_locked"])
-        candidate = Candidate.objects.get(email="student@example.com")
-        self.assertTrue(candidate.access_locked)
-        self.assertEqual(candidate.attempts.get(id=started.data["id"]).status, "terminated")
-        state = self.client.get("/api/rounds/aptitude/state/")
-        self.assertEqual(state.status_code, 423)
-        candidate.refresh_from_db()
-        self.assertEqual(candidate.hiring_status, "rejected")
-        self.assertIn("fullscreen", candidate.ai_rejection_reason)
-
-    def test_proctor_recording_is_uploaded_in_admin_playback_chunks(self):
-        self.register_candidate()
-        self.client.post("/api/rounds/aptitude/start/", {}, format="json")
-        started = self.client.post("/api/proctor/recordings/start/", {"mime_type": "video/webm", "kind": "screen"}, format="json")
-        self.assertEqual(started.status_code, 201)
-        chunk = self.client.post(
-            f"/api/proctor/recordings/{started.data['id']}/chunks/?sequence=0",
-            b"webm-segment", content_type="application/octet-stream",
-        )
-        self.assertEqual(chunk.status_code, 200)
-        recording = ProctorRecording.objects.get(id=started.data["id"])
-        self.assertEqual(recording.kind, "screen")
-        self.assertEqual(recording.chunk_count, 1)
-        self.assertEqual(recording.total_size, len(b"webm-segment"))
-        self.client.post(f"/api/proctor/recordings/{started.data['id']}/finish/", {}, format="json")
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
-        playback = self.client.get(f"/api/staff/recordings/{started.data['id']}/?sequence=0")
-        self.assertEqual(playback.content, b"webm-segment")
-
-    def test_proctor_recording_rejects_unknown_kind(self):
-        self.register_candidate()
-        self.client.post("/api/rounds/aptitude/start/", {}, format="json")
-        response = self.client.post("/api/proctor/recordings/start/", {"kind": "unknown"}, format="json")
-        self.assertEqual(response.status_code, 400)
 
     def test_staff_reset_preserves_previous_attempt_and_allows_retake(self):
         registration = self.register_candidate()

@@ -14,7 +14,6 @@ import {
   ChevronLeft,
   Clock3,
   Code2,
-  Camera,
   Download,
   Eye,
   EyeOff,
@@ -22,18 +21,15 @@ import {
   LayoutDashboard,
   LockKeyhole,
   LogOut,
-  Maximize2,
   Play,
   Printer,
   RotateCcw,
   Search,
-  ScreenShare,
   ShieldCheck,
   Trash2,
   Trophy,
   UserRound,
   UsersRound,
-  Video,
   X,
 } from "lucide-react";
 import {
@@ -50,8 +46,6 @@ import luxmorLogo from "./assets/WhatsA mail.jpeg";
 import "./App.css";
 
 const API = import.meta.env.VITE_API_URL || "/api";
-let activeProctorStream = null;
-let activeScreenStream = null;
 const roles = [
   ["data-analyst", "Data Analyst", "SQL, statistics & insights"],
   ["frontend-developer", "Frontend Developer", "React, JavaScript, HTML & CSS"],
@@ -88,19 +82,16 @@ const roundMeta = {
   aptitude: {
     title: "Cognitive aptitude",
     caption: "60 questions · 60 minutes",
-    passRequirement: "Score at least 30 out of 60 to continue",
     icon: BarChart3,
   },
   technical: {
     title: "Technical aptitude",
     caption: "20 questions · 20 minutes",
-    passRequirement: "Score at least 10 out of 20 to continue",
     icon: UserRound,
   },
   coding: {
     title: "Coding challenge",
     caption: "2 problems · 40 minutes",
-    passRequirement: "Score at least 10 out of 20 to complete the assessment",
     icon: Code2,
   },
 };
@@ -155,30 +146,6 @@ async function request(path, options = {}, admin = false) {
   return data;
 }
 
-async function adminBlob(path) {
-  const response = await fetch(`${API}${path}`, {
-    headers: { Authorization: `Bearer ${localStorage.getItem("adminToken")}` },
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.detail || "The file could not be loaded.");
-  }
-  return { blob: await response.blob(), disposition: response.headers.get("Content-Disposition") || "" };
-}
-
-async function downloadResume(candidate) {
-  const { blob, disposition } = await adminBlob(`/staff/candidates/${candidate.id}/resume/`);
-  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  const fallback = disposition.match(/filename="([^"]+)"/i)?.[1] || candidate.resume?.name || "resume";
-  const name = encoded ? decodeURIComponent(encoded) : fallback;
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 function Brand({ light = false }) {
   return (
     <div className={`brand ${light ? "brand-light" : ""}`}>
@@ -205,7 +172,6 @@ function Landing() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [roleText, setRoleText] = useState("");
-  const [resume, setResume] = useState(null);
   const set = (key) => (event) =>
     setForm({ ...form, [key]: event.target.value });
   const submit = async (event) => {
@@ -220,17 +186,12 @@ function Landing() {
       setError("Phone number must contain exactly 10 digits.");
       return;
     }
-    if (!resume) {
-      setError("Upload your resume in PDF, Word, or OpenDocument format.");
-      return;
-    }
     setLoading(true);
     setError("");
     try {
       const body = new FormData();
       Object.entries(form).forEach(([key, value]) => body.append(key, value));
       body.append("address_confirmed", "true");
-      body.append("resume", resume, resume.name);
       const data = await request("/candidates/register/", {
         method: "POST",
         body,
@@ -370,26 +331,6 @@ function Landing() {
                 Aadhaar. It will be used for office-letter processing.
               </small>
             </label>
-            <label>
-              Resume (maximum 3 MB)
-              <input
-                required
-                type="file"
-                accept=".pdf,.doc,.docx,.odt,.odf,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.oasis.opendocument.text"
-                onChange={(event) => {
-                  const file = event.target.files?.[0] || null;
-                  if (file && file.size > 3 * 1024 * 1024) {
-                    event.target.value = "";
-                    setResume(null);
-                    setError("Resume must be 3 MB or smaller.");
-                  } else {
-                    setResume(file);
-                    setError("");
-                  }
-                }}
-              />
-              <small className="field-help">PDF, DOC, DOCX, ODT, or ODF only. Images are rejected.</small>
-            </label>
             <div className="field-row">
               <label>
                 Job profile you are interested in
@@ -496,7 +437,7 @@ function Landing() {
           <article>
             <h3>Are candidate results public?</h3>
             <p>
-              No. Assessment scores, integrity records, and coding results are
+              No. Candidate submissions and recruitment decisions are
               confidential and available only to authorized Luxmor recruitment
               staff.
             </p>
@@ -565,24 +506,7 @@ function Portal() {
             <b>{candidate.id.slice(0, 8).toUpperCase()}</b>
           </div>
         </section>
-        {candidate.access_locked ? (
-          <section className="completion access-lock-card">
-            <div className="trophy"><LockKeyhole /></div>
-            <span className="eyebrow"><span /> Application rejected</span>
-            <h2>This assessment session has ended.</h2>
-            <p>
-              Leaving fullscreen or switching away from the exam ends the session.
-              Contact the recruitment administrator if you need another attempt.
-            </p>
-            <div className="result-private-note rejection-note">
-              <X size={18} />
-              <span>
-                <b>Reason for rejection</b>
-                {candidate.ai_rejection_reason || "The protected assessment session was interrupted or an integrity rule was violated."}
-              </span>
-            </div>
-          </section>
-        ) : candidate.hiring_status === "rejected" ? (
+        {candidate.hiring_status === "rejected" ? (
           <Rejection candidate={candidate} />
         ) : candidate.status === "completed" ? (
           <Completion candidate={candidate} />
@@ -646,8 +570,8 @@ function Portal() {
               <div>
                 <b>Before you begin</b>
                 <span>
-                  The test enters fullscreen. Keep this tab active, allow
-                  pop-ups, and ensure a stable internet connection.
+                  Ensure a stable internet connection and submit each answer
+                  before its timer expires.
                 </span>
               </div>
             </div>
@@ -687,17 +611,16 @@ function Rejection({ candidate }) {
   return (
     <section className="completion rejection-card">
       <div className="trophy rejection-icon"><X /></div>
-      <span className="eyebrow"><span /> Assessment result</span>
+      <span className="eyebrow"><span /> Application update</span>
       <h2>Thank you for your time, {candidate.name.split(" ")[0]}.</h2>
       <p>
-        You did not reach the minimum score required to continue to the next
-        round, so your assessment has ended.
+        The recruitment team has updated your application status.
       </p>
       <div className="result-private-note rejection-note">
         <X size={18} />
         <span>
           <b>Reason for rejection</b>
-          {candidate.ai_rejection_reason || "The required score for this round was not met."}
+          {candidate.ai_rejection_reason || "Your application was not selected for the next step."}
         </span>
       </div>
     </section>
@@ -709,82 +632,20 @@ function Instructions() {
   const navigate = useNavigate();
   const meta = roundMeta[type];
   const [loading, setLoading] = useState(false);
-  const [permissionLoading, setPermissionLoading] = useState(false);
-  const [devicesReady, setDevicesReady] = useState(false);
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState("");
-  const previewRef = useRef(null);
-  const handoffRef = useRef(false);
-  useEffect(() => () => {
-    if (!handoffRef.current) {
-      activeProctorStream?.getTracks().forEach((track) => track.stop());
-      activeProctorStream = null;
-      activeScreenStream?.getTracks().forEach((track) => track.stop());
-      activeScreenStream = null;
-    }
-  }, []);
   if (!meta) return <Navigate to="/portal" />;
-  const checkDevices = async () => {
-    setPermissionLoading(true);
-    setError("");
-    try {
-      if (!navigator.mediaDevices?.getUserMedia || !navigator.mediaDevices?.getDisplayMedia) {
-        throw new Error("This browser does not support the camera and screen access required for the assessment. Use a current Chrome, Edge, or Firefox browser.");
-      }
-      activeProctorStream?.getTracks().forEach((track) => track.stop());
-      activeScreenStream?.getTracks().forEach((track) => track.stop());
-      activeProctorStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 320 }, height: { ideal: 240 } },
-        audio: true,
-      });
-      if (!activeProctorStream.getVideoTracks().length || !activeProctorStream.getAudioTracks().length) {
-        throw new Error("Both a working camera and microphone are required.");
-      }
-      activeScreenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 10, max: 15 } },
-        audio: false,
-      });
-      if (!activeScreenStream.getVideoTracks().length) {
-        throw new Error("Screen sharing is required.");
-      }
-      if (previewRef.current) {
-        previewRef.current.srcObject = activeProctorStream;
-        await previewRef.current.play().catch(() => {});
-      }
-      setDevicesReady(true);
-    } catch (err) {
-      activeProctorStream?.getTracks().forEach((track) => track.stop());
-      activeProctorStream = null;
-      activeScreenStream?.getTracks().forEach((track) => track.stop());
-      activeScreenStream = null;
-      setDevicesReady(false);
-      setError(`${err.message} Allow the requested device and screen permissions, then try again.`);
-    } finally {
-      setPermissionLoading(false);
-    }
-  };
   const begin = async () => {
-    const cameraLive = activeProctorStream?.getVideoTracks().some((track) => track.readyState === "live");
-    const microphoneLive = activeProctorStream?.getAudioTracks().some((track) => track.readyState === "live");
-    const screenLive = activeScreenStream?.getVideoTracks().some((track) => track.readyState === "live");
-    if (!devicesReady || !cameraLive || !microphoneLive || !screenLive || !consent) {
-      setDevicesReady(false);
-      setError("Complete the camera, microphone, and screen-sharing check and accept the assessment rules before starting.");
+    if (!consent) {
+      setError("Read and accept the assessment instructions before starting.");
       return;
     }
     setLoading(true);
     setError("");
     try {
-      await document.documentElement.requestFullscreen();
       await request(`/rounds/${type}/start/`, { method: "POST" });
-      handoffRef.current = true;
       navigate(`/assessment/${type}`);
     } catch (err) {
-      activeProctorStream?.getTracks().forEach((track) => track.stop());
-      activeProctorStream = null;
-      activeScreenStream?.getTracks().forEach((track) => track.stop());
-      activeScreenStream = null;
-      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
       setError(err.message);
       setLoading(false);
     }
@@ -818,48 +679,11 @@ function Instructions() {
             </span>
           </div>
           <div>
-            <Maximize2 />
-            <span>
-              <b>Fullscreen is mandatory</b>
-              <small>
-                Leaving fullscreen or changing tabs ends your assessment and
-                requires an administrator reset.
-              </small>
-            </span>
-          </div>
-          <div>
-            <Camera />
-            <span>
-              <b>Continuous camera and microphone recording</b>
-              <small>
-                Your face must remain visible and you must remain the only person in view. Audio and video are recorded for recruiter review.
-              </small>
-            </span>
-          </div>
-          <div>
-            <ScreenShare />
-            <span>
-              <b>Continuous screen recording</b>
-              <small>
-                Your shared screen is recorded throughout the assessment. Stopping screen sharing ends the attempt.
-              </small>
-            </span>
-          </div>
-          <div>
             <ShieldCheck />
             <span>
-              <b>Automated monitoring and rejection</b>
+              <b>Complete each stage independently</b>
               <small>
-                Switching tabs, leaving fullscreen, closing the page, disabling the camera or microphone, or detecting multiple faces ends the attempt and can automatically mark it rejected. Three consecutive no-face checks also trigger rejection. The exact reason is saved for the recruiter.
-              </small>
-            </span>
-          </div>
-          <div>
-            <LockKeyhole />
-            <span>
-              <b>No restart without recruiter approval</b>
-              <small>
-                A terminated attempt stays locked. Only an administrator can review the evidence and reset access.
+                Use your own knowledge and submit every answer before its timer expires.
               </small>
             </span>
           </div>
@@ -872,38 +696,19 @@ function Instructions() {
               </small>
             </span>
           </div>
-          <div>
-            <BarChart3 />
-            <span>
-              <b>Minimum score required</b>
-              <small>
-                {meta.passRequirement}. A lower score ends the assessment and
-                prevents access to the next stage.
-              </small>
-            </span>
-          </div>
         </div>
-        <section className={`device-check ${devicesReady ? "ready" : ""}`}>
-          <video ref={previewRef} muted playsInline />
-          <div>
-            <b>{devicesReady ? "Camera, microphone, and screen are ready" : "Permission check required"}</b>
-            <small>{devicesReady ? "Keep your face centered and keep screen sharing active." : "Click below, allow camera and microphone, then choose the screen to share."}</small>
-            <button className="secondary" type="button" onClick={checkDevices} disabled={permissionLoading}>
-              <ScreenShare /> {permissionLoading ? "Checking devices…" : devicesReady ? "Check devices again" : "Allow devices & share screen"}
-            </button>
-          </div>
-        </section>
+        
         <label className="rule-consent">
           <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
-          <span>I have read these rules and consent to camera, microphone, and screen recording and automated integrity checks. I understand that a violation may terminate and reject my assessment.</span>
+          <span>I have read the assessment instructions and I am ready to begin.</span>
         </label>
         {error && <div className="error-box">{error}</div>}
-        <button className="primary wide" onClick={begin} disabled={loading || !devicesReady || !consent}>
+        <button className="primary wide" onClick={begin} disabled={loading || !consent}>
           {loading ? (
             "Preparing stage…"
           ) : (
             <>
-              <Play size={18} /> Enter fullscreen & begin
+              <Play size={18} /> Begin stage
             </>
           )}
         </button>
@@ -924,15 +729,10 @@ function Assessment() {
   const [previewCode, setPreviewCode] = useState("");
   const [language, setLanguage] = useState("python");
   const [remaining, setRemaining] = useState(0);
-  const [blocked, setBlocked] = useState(!document.fullscreenElement);
   const [busy, setBusy] = useState(false);
   const [runResults, setRunResults] = useState(null);
   const [error, setError] = useState("");
-  const [mediaError, setMediaError] = useState("");
   const submitting = useRef(false);
-  const videoRef = useRef(null);
-  const recorderRef = useRef({ camera: null, screen: null });
-  const uploadChainRef = useRef({ camera: Promise.resolve(), screen: Promise.resolve() });
   const load = useCallback(async () => {
     try {
       const data = await request(`/rounds/${type}/state/`);
@@ -965,163 +765,6 @@ function Assessment() {
     const timer = setTimeout(() => setPreviewCode(code), 500);
     return () => clearTimeout(timer);
   }, [code]);
-  const logEvent = useCallback(
-    (event_type) =>
-      request("/proctor/events/", {
-        method: "POST",
-        body: JSON.stringify({
-          event_type,
-          details: { path: location.pathname },
-        }),
-      })
-        .then((data) => {
-          if (data.access_locked) setBlocked(true);
-          return setState((s) => (s ? {
-            ...s,
-            violations: data.violations,
-            access_locked: data.access_locked,
-            rejection_reason: data.rejection_reason,
-          } : s));
-        })
-        .catch(() => {}),
-    [],
-  );
-  useEffect(() => {
-    let cancelled = false;
-    let faceTimer;
-    const recorders = recorderRef.current;
-    const token = localStorage.getItem("candidateToken");
-    const uploadChunk = (kind, recordingId, sequence, blob) => {
-      uploadChainRef.current[kind] = uploadChainRef.current[kind]
-        .then(() => fetch(`${API}/proctor/recordings/${recordingId}/chunks/?sequence=${sequence}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/octet-stream", Authorization: `Bearer ${token}` },
-          body: blob,
-        }))
-        .then((response) => {
-          if (!response.ok) throw new Error("Recording upload failed");
-        })
-        .catch(() => setMediaError("The proctor recording connection was interrupted."));
-    };
-    const startRecorder = async (kind, stream, mimeType) => {
-      const started = await request("/proctor/recordings/start/", {
-        method: "POST", body: JSON.stringify({ kind, mime_type: mimeType }),
-      });
-      let sequence = 0;
-      const options = kind === "screen"
-        ? { mimeType, videoBitsPerSecond: 600000 }
-        : { mimeType, videoBitsPerSecond: 180000, audioBitsPerSecond: 24000 };
-      const recorder = new MediaRecorder(stream, options);
-      recorders[kind] = recorder;
-      recorder.ondataavailable = (event) => {
-        if (event.data.size) uploadChunk(kind, started.id, sequence++, event.data);
-      };
-      recorder.onstop = () => {
-        uploadChainRef.current[kind].finally(() => request(`/proctor/recordings/${started.id}/finish/`, { method: "POST" }).catch(() => {}));
-      };
-      recorder.start(15000);
-    };
-    const startMedia = async () => {
-      try {
-        const stream = activeProctorStream?.active
-          ? activeProctorStream
-          : await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        const screenStream = activeScreenStream?.active
-          ? activeScreenStream
-          : await navigator.mediaDevices.getDisplayMedia({
-              video: { frameRate: { ideal: 10, max: 15 } }, audio: false,
-            });
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          screenStream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        activeProctorStream = stream;
-        activeScreenStream = screenStream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
-        stream.getVideoTracks().forEach((track) => track.addEventListener("ended", () => !cancelled && logEvent("camera_disabled"), { once: true }));
-        stream.getAudioTracks().forEach((track) => track.addEventListener("ended", () => !cancelled && logEvent("microphone_disabled"), { once: true }));
-        screenStream.getVideoTracks().forEach((track) => track.addEventListener("ended", () => !cancelled && logEvent("screen_share_stopped"), { once: true }));
-        const mimeType = ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"].find(
-          (value) => window.MediaRecorder?.isTypeSupported(value),
-        );
-        if (!window.MediaRecorder || !mimeType) throw new Error("This browser cannot create the required assessment recording.");
-        // Larger intervals substantially reduce API and database writes when a
-        // full campus cohort is taking the assessment simultaneously.
-        await Promise.all([
-          startRecorder("camera", stream, mimeType),
-          startRecorder("screen", screenStream, mimeType),
-        ]);
-        if ("FaceDetector" in window) {
-          const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 3 });
-          faceTimer = setInterval(async () => {
-            if (!videoRef.current || videoRef.current.readyState < 2) return;
-            try {
-              const faces = await detector.detect(videoRef.current);
-              if (faces.length > 1) logEvent("multiple_faces");
-              else if (faces.length === 0) logEvent("face_missing");
-            } catch {}
-          }, 10000);
-        }
-      } catch (mediaIssue) {
-        setMediaError(mediaIssue.message || "Camera, microphone, and screen sharing are required.");
-        logEvent(activeScreenStream?.active ? "camera_disabled" : "screen_share_stopped");
-      }
-    };
-    startMedia();
-    return () => {
-      cancelled = true;
-      clearInterval(faceTimer);
-      Object.values(recorders).forEach((recorder) => {
-        if (recorder?.state === "recording") recorder.stop();
-      });
-      activeProctorStream?.getTracks().forEach((track) => track.stop());
-      activeProctorStream = null;
-      activeScreenStream?.getTracks().forEach((track) => track.stop());
-      activeScreenStream = null;
-    };
-  }, [type, logEvent]);
-  useEffect(() => {
-    if (!document.fullscreenElement) logEvent("fullscreen_exit");
-    const fs = () => {
-      const exited = !document.fullscreenElement;
-      setBlocked(exited);
-      if (exited) {
-        setState((current) => current ? { ...current, access_locked: true } : current);
-        logEvent("fullscreen_exit");
-      }
-    };
-    const visibility = () => {
-      if (document.hidden) logEvent("tab_hidden");
-    };
-    const pageExit = () => {
-      const token = localStorage.getItem("candidateToken");
-      if (!token) return;
-      fetch(`${API}/proctor/events/`, {
-        method: "POST",
-        keepalive: true,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          event_type: "page_exit",
-          details: { path: location.pathname },
-        }),
-      }).catch(() => {});
-    };
-    document.addEventListener("fullscreenchange", fs);
-    document.addEventListener("visibilitychange", visibility);
-    window.addEventListener("pagehide", pageExit);
-    return () => {
-      document.removeEventListener("fullscreenchange", fs);
-      document.removeEventListener("visibilitychange", visibility);
-      window.removeEventListener("pagehide", pageExit);
-    };
-  }, [logEvent]);
   const submit = useCallback(async () => {
     if (!state?.question || submitting.current) return;
     submitting.current = true;
@@ -1175,8 +818,6 @@ function Assessment() {
         setCode(data.state.question.starter_code[nextLanguage] || "");
       }
       if (data.state.status !== "in_progress") {
-        if (document.fullscreenElement)
-          await document.exitFullscreen().catch(() => {});
         navigate("/portal");
       }
     } catch (e) {
@@ -1261,20 +902,6 @@ function Assessment() {
             {String(minutes).padStart(2, "0")}:
             {String(seconds).padStart(2, "0")}
           </b>
-        </div>
-        <div className="violation">
-          <ShieldCheck size={16} />
-          {state.violations} violations
-        </div>
-        <div className="proctor-live" title="Camera, microphone, and screen recording active">
-          <video ref={(node) => {
-            videoRef.current = node;
-            if (node && activeProctorStream) {
-              node.srcObject = activeProctorStream;
-              node.play().catch(() => {});
-            }
-          }} muted playsInline />
-          <span><i /> REC</span>
         </div>
       </header>
       <div className="test-progress">
@@ -1381,7 +1008,7 @@ function Assessment() {
                 disabled={busy || !code.trim()}
               >
                 {busy ? (
-                  "Evaluating…"
+                    "Submitting…"
                 ) : (
                   <>
                     Submit solution <ArrowRight size={16} />
@@ -1396,7 +1023,6 @@ function Assessment() {
           <div className="question-card">
             <div className="question-meta">
               <span>{q.category.replace("-", " ")}</span>
-              <span>+1 point</span>
             </div>
             <h1>{q.prompt}</h1>
             <div className="options">
@@ -1435,29 +1061,6 @@ function Assessment() {
             </div>
           </div>
         </main>
-      )}
-      {(blocked || mediaError) && (
-        <div className="fullscreen-block">
-          <div>
-            {state.access_locked || mediaError ? <LockKeyhole /> : <Maximize2 />}
-            <h2>{state.access_locked || mediaError ? "Assessment access locked" : "Verifying exam session"}</h2>
-            <p>{mediaError || (state.access_locked
-              ? state.rejection_reason || "You left the protected exam screen. This attempt has ended and cannot be resumed until an administrator resets your access."
-              : "Please wait while the portal verifies this fullscreen exit.")}</p>
-            {(state.access_locked || mediaError) && (
-              <button className="primary" onClick={() => navigate("/portal")}>
-                Return to assessment centre
-              </button>
-            )}
-          </div>
-          <div>
-            <Camera />
-            <span>
-              <b>Camera, microphone, and screen sharing are required</b>
-              <small>Your camera, microphone, and screen are recorded and checked for integrity. Disabling any required stream ends the attempt.</small>
-            </span>
-          </div>
-        </div>
       )}
     </div>
   );
@@ -1571,8 +1174,6 @@ function AdminDashboard() {
   const [locationFilter, setLocationFilter] = useState("");
   const [hiringFilter, setHiringFilter] = useState("");
   const [assessmentFilter, setAssessmentFilter] = useState("");
-  const [integrityFilter, setIntegrityFilter] = useState("");
-  const [scoreFilter, setScoreFilter] = useState("");
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [tab, setTab] = useState("overview");
@@ -1606,11 +1207,7 @@ function AdminDashboard() {
       const previous = current.candidates.find(
         (item) => item.id === candidateId,
       );
-      merged = {
-        ...previous,
-        ...payload.candidate,
-        percentage: previous.percentage,
-      };
+      merged = { ...previous, ...payload.candidate };
       return {
         ...current,
         candidates: current.candidates.map((item) =>
@@ -1620,7 +1217,7 @@ function AdminDashboard() {
     });
     setSelected((current) =>
       current?.id === candidateId
-        ? { ...current, ...payload.candidate, percentage: current.percentage }
+        ? { ...current, ...payload.candidate }
         : current,
     );
     setDetail(payload.candidate);
@@ -1650,7 +1247,7 @@ function AdminDashboard() {
         { method: "POST" },
         true,
       );
-      const reset = { ...candidate, ...payload.candidate, percentage: 0 };
+      const reset = { ...candidate, ...payload.candidate };
       setData((current) => ({
         ...current,
         candidates: current.candidates.map((item) =>
@@ -1665,7 +1262,7 @@ function AdminDashboard() {
   };
   const deleteAllSelected = async () => {
     const count = data.candidates.filter((candidate) => candidate.hiring_status === "selected").length;
-    if (!count || !window.confirm(`Delete all ${count} selected candidates and their files, recordings, and assessment data? This cannot be undone.`)) return;
+    if (!count || !window.confirm(`Delete all ${count} selected candidates and their assessment data? This cannot be undone.`)) return;
     try {
       await request("/staff/selected/delete-all/", { method: "DELETE" }, true);
       setData((current) => ({ ...current, candidates: current.candidates.filter((candidate) => candidate.hiring_status !== "selected") }));
@@ -1677,7 +1274,7 @@ function AdminDashboard() {
   };
   const deleteAllRejected = async () => {
     const count = data.candidates.filter((candidate) => candidate.hiring_status === "rejected").length;
-    if (deletingRejected || !count || !window.confirm(`Delete all ${count} rejected candidates and their files, recordings, and assessment data? This cannot be undone.`)) return;
+    if (deletingRejected || !count || !window.confirm(`Delete all ${count} rejected candidates and their assessment data? This cannot be undone.`)) return;
     setDeletingRejected(true);
     let deleted = 0;
     try {
@@ -1750,9 +1347,7 @@ function AdminDashboard() {
   const downloadReport = () => {
     const columns = [
       "Student name", "Email", "Phone", "College", "Degree / designation", "Role",
-      "Preferred location", "Hiring status", "Assessment status", "Overall score",
-      "Aptitude score", "Technical score", "Coding score", "Test cases passed",
-      "Total test cases", "Violations", "Registered at",
+      "Preferred location", "Hiring status", "Assessment status", "Registered at",
     ];
     const csvCell = (value) => {
       const text = String(value ?? "");
@@ -1760,19 +1355,10 @@ function AdminDashboard() {
       return `"${spreadsheetSafe.replaceAll('"', '""')}"`;
     };
     const lines = reportCandidates.map((candidate) => {
-      const round = (type) => candidate.rounds.find((item) => item.round_type === type);
-      const score = (type) => {
-        const item = round(type);
-        return item ? `${item.score}/${item.max_score}` : "Not attempted";
-      };
       return [
         candidate.name, candidate.email, candidate.phone, candidate.college,
         candidate.designation, candidate.role_label, candidate.preferred_location_label,
-        candidate.hiring_status_label, candidate.status, `${candidate.percentage}%`,
-        score("aptitude"), score("technical"), score("coding"),
-        candidate.rounds.reduce((sum, item) => sum + item.passed_tests, 0),
-        candidate.rounds.reduce((sum, item) => sum + item.total_tests, 0),
-        candidate.rounds.reduce((sum, item) => sum + item.violations, 0),
+        candidate.hiring_status_label, candidate.status,
         candidate.registered_at ? new Date(candidate.registered_at).toLocaleString() : "",
       ].map(csvCell).join(",");
     });
@@ -1790,29 +1376,12 @@ function AdminDashboard() {
       ? data.candidates.filter((candidate) => candidate.hiring_status === "rejected")
       : data.candidates;
   const rows = tableCandidates.filter((c) => {
-    const violations = c.rounds.reduce(
-      (sum, round) => sum + round.violations,
-      0,
-    );
-    const scoreMatch =
-      !scoreFilter ||
-      (scoreFilter === "80" && c.percentage >= 80) ||
-      (scoreFilter === "60" && c.percentage >= 60 && c.percentage < 80) ||
-      (scoreFilter === "40" && c.percentage >= 40 && c.percentage < 60) ||
-      (scoreFilter === "below40" && c.percentage < 40);
-    const integrityMatch =
-      !integrityFilter ||
-      (integrityFilter === "zero" && violations === 0) ||
-      (integrityFilter === "flagged" && violations > 0) ||
-      (integrityFilter === "high" && violations >= 3);
     return (
       (!role || c.role === role) &&
       (!collegeFilter || collegeKey(c.college) === collegeFilter) &&
       (!locationFilter || c.preferred_location === locationFilter) &&
       (!hiringFilter || c.hiring_status === hiringFilter) &&
       (!assessmentFilter || c.status === assessmentFilter) &&
-      scoreMatch &&
-      integrityMatch &&
       `${c.name} ${c.email} ${c.college}`
         .toLowerCase()
         .includes(query.toLowerCase())
@@ -1822,46 +1391,9 @@ function AdminDashboard() {
     name: name.split(" ")[0],
     candidates: data.candidates.filter((c) => c.role === value).length,
   }));
-  const roundPerformance = Object.keys(roundMeta).map((roundType) => {
-    const attempts = data.candidates.flatMap((candidate) =>
-      candidate.rounds.filter((round) => round.round_type === roundType),
-    );
-    const average = attempts.length
-      ? attempts.reduce(
-          (sum, attempt) =>
-            sum +
-            (attempt.max_score ? (attempt.score / attempt.max_score) * 100 : 0),
-          0,
-        ) / attempts.length
-      : 0;
-    return {
-      name: roundMeta[roundType].title.split(" ")[0],
-      average: Math.round(average * 10) / 10,
-      attempts: attempts.length,
-    };
-  });
-  const rolePerformance = roles.map(([value, name]) => {
-    const candidates = data.candidates.filter(
-      (candidate) => candidate.role === value,
-    );
-    return {
-      name: name.split(" ")[0],
-      average: candidates.length
-        ? Math.round(
-            (candidates.reduce(
-              (sum, candidate) => sum + candidate.percentage,
-              0,
-            ) /
-              candidates.length) *
-              10,
-          ) / 10
-        : 0,
-    };
-  });
   const titles = {
     overview: "Hiring overview",
     candidates: "Candidate directory",
-    analytics: "Assessment analytics",
     selected: "Selected candidates",
     rejected: "Rejected candidates",
     reports: "College reports",
@@ -1884,13 +1416,6 @@ function AdminDashboard() {
           >
             <UsersRound />
             Candidates
-          </button>
-          <button
-            className={tab === "analytics" ? "active" : ""}
-            onClick={() => setTab("analytics")}
-          >
-            <BarChart3 />
-            Assessment analytics
           </button>
           <button
             className={tab === "selected" ? "active" : ""}
@@ -1952,14 +1477,14 @@ function AdminDashboard() {
               value={data.summary.completed}
             />
             <Stat
-              icon={BarChart3}
-              label="Average score"
-              value={`${data.summary.average}%`}
+              icon={UserRound}
+              label="Selected"
+              value={data.candidates.filter((candidate) => candidate.hiring_status === "selected").length}
             />
             <Stat
-              icon={Trophy}
-              label="Highest score"
-              value={`${data.summary.top_score}%`}
+              icon={X}
+              label="Rejected"
+              value={data.candidates.filter((candidate) => candidate.hiring_status === "rejected").length}
             />
           </div>
         )}
@@ -1995,8 +1520,8 @@ function AdminDashboard() {
             <section className="panel leaderboard">
               <div className="panel-head">
                 <div>
-                  <h3>Top performers</h3>
-                  <p>Overall assessment score</p>
+                  <h3>Recent candidates</h3>
+                  <p>Latest registrations</p>
                 </div>
                 <Trophy />
               </div>
@@ -2008,69 +1533,9 @@ function AdminDashboard() {
                     <b>{c.name}</b>
                     <small>{c.role_label}</small>
                   </div>
-                  <strong>{c.percentage}%</strong>
+                  <strong>{c.status}</strong>
                 </div>
               ))}
-            </section>
-          </div>
-        )}
-        {tab === "analytics" && (
-          <div className="analytics-grid">
-            <section className="panel">
-              <div className="panel-head">
-                <div>
-                  <h3>Average score by round</h3>
-                  <p>Percentage performance across submitted attempts</p>
-                </div>
-              </div>
-              <div className="chart analytics-chart">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={roundPerformance}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                    <YAxis
-                      domain={[0, 100]}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <Tooltip formatter={(value) => `${value}%`} />
-                    <Bar
-                      dataKey="average"
-                      name="Average score"
-                      fill="#6c4df6"
-                      radius={[7, 7, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-            <section className="panel">
-              <div className="panel-head">
-                <div>
-                  <h3>Average score by role</h3>
-                  <p>Overall candidate performance by preferred role</p>
-                </div>
-              </div>
-              <div className="chart analytics-chart">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={rolePerformance}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                    <YAxis
-                      domain={[0, 100]}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <Tooltip formatter={(value) => `${value}%`} />
-                    <Bar
-                      dataKey="average"
-                      name="Average score"
-                      fill="#22a06b"
-                      radius={[7, 7, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
             </section>
           </div>
         )}
@@ -2157,7 +1622,7 @@ function AdminDashboard() {
                 <div className="table-scroll report-table">
                   <table>
                     <thead>
-                      <tr><th>Student</th><th>College</th><th>Role</th><th>Result</th><th>Assessment</th><th>Score</th><th>Violations</th><th>Details</th></tr>
+                      <tr><th>Student</th><th>College</th><th>Role</th><th>Result</th><th>Assessment</th><th>Details</th></tr>
                     </thead>
                     <tbody>
                       {reportCandidates.map((candidate) => (
@@ -2167,8 +1632,6 @@ function AdminDashboard() {
                           <td>{candidate.role_label}<br /><small>{candidate.preferred_location_label}</small></td>
                           <td><span className={`report-result ${candidate.hiring_status}`}>{candidate.hiring_status_label}</span></td>
                           <td>{candidate.status}</td>
-                          <td><b className="score">{candidate.percentage}%</b></td>
-                          <td>{candidate.rounds.reduce((sum, item) => sum + item.violations, 0)}</td>
                           <td><button className="view-btn" aria-label={`View ${candidate.name}'s detailed report`} onClick={() => open(candidate)}><Eye /></button></td>
                         </tr>
                       ))}
@@ -2180,7 +1643,7 @@ function AdminDashboard() {
             )}
           </section>
         )}
-        {tab !== "analytics" && tab !== "reports" && (
+        {tab !== "reports" && (
           <section className="panel candidate-table">
             <div className="panel-head">
               <div>
@@ -2262,32 +1725,11 @@ function AdminDashboard() {
                   <option value="coding">Coding</option>
                   <option value="completed">Completed</option>
                 </select>
-                <select
-                  value={integrityFilter}
-                  onChange={(e) => setIntegrityFilter(e.target.value)}
-                >
-                  <option value="">All integrity records</option>
-                  <option value="zero">Zero violations</option>
-                  <option value="flagged">Any violation</option>
-                  <option value="high">3+ violations</option>
-                </select>
-                <select
-                  value={scoreFilter}
-                  onChange={(e) => setScoreFilter(e.target.value)}
-                >
-                  <option value="">All scores</option>
-                  <option value="80">80% and above</option>
-                  <option value="60">60–79%</option>
-                  <option value="40">40–59%</option>
-                  <option value="below40">Below 40%</option>
-                </select>
                 {(role ||
                   collegeFilter ||
                   locationFilter ||
                   hiringFilter ||
                   assessmentFilter ||
-                  integrityFilter ||
-                  scoreFilter ||
                   query) && (
                   <button
                     className="clear-filters"
@@ -2298,8 +1740,6 @@ function AdminDashboard() {
                       setLocationFilter("");
                       setHiringFilter("");
                       setAssessmentFilter("");
-                      setIntegrityFilter("");
-                      setScoreFilter("");
                     }}
                   >
                     Clear
@@ -2311,25 +1751,17 @@ function AdminDashboard() {
               <table>
                 <thead>
                   <tr>
-                    <th>Rank</th>
                     <th>Candidate</th>
                     <th>Role</th>
                     <th>Location</th>
                     <th>Hiring status</th>
                     <th>Assessment</th>
-                    <th>Test cases</th>
-                    <th>Violations</th>
-                    <th>Score</th>
-                    <th>Resume</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((c, i) => (
+                  {rows.map((c) => (
                     <tr key={c.id}>
-                      <td>
-                        <b>#{i + 1}</b>
-                      </td>
                       <td>
                         <div className="person">
                           <span>{c.name[0]}</span>
@@ -2364,21 +1796,6 @@ function AdminDashboard() {
                         >
                           {c.status}
                         </span>
-                      </td>
-                      <td>
-                        {c.rounds.reduce((s, r) => s + r.passed_tests, 0)} /{" "}
-                        {c.rounds.reduce((s, r) => s + r.total_tests, 0)}
-                      </td>
-                      <td>{c.rounds.reduce((s, r) => s + r.violations, 0)}</td>
-                      <td>
-                        <b className="score">{c.percentage}%</b>
-                      </td>
-                      <td>
-                        {c.resume ? (
-                          <button className="file-btn" title={`Download ${c.resume.name}`} onClick={() => downloadResume(c).catch((error) => window.alert(error.message))}>
-                            <Download /> {c.resume.name}
-                          </button>
-                        ) : <span className="muted">Legacy record</span>}
                       </td>
                       <td>
                         <button className="view-btn" onClick={() => open(c)}>
@@ -2441,24 +1858,6 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
   const [statusDraft, setStatusDraft] = useState(candidate.hiring_status);
   const [statusNote, setStatusNote] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
-  const [recordingUrls, setRecordingUrls] = useState({});
-  const recordingUrlsRef = useRef({});
-  useEffect(() => () => Object.values(recordingUrlsRef.current).forEach((url) => URL.revokeObjectURL(url)), []);
-  const viewRecording = async (recording) => {
-    try {
-      const parts = [];
-      for (let sequence = 0; sequence < recording.chunks; sequence += 1) {
-        const { blob } = await adminBlob(`/staff/recordings/${recording.id}/?sequence=${sequence}`);
-        parts.push(blob);
-      }
-      const blob = new Blob(parts, { type: recording.mime_type || "video/webm" });
-      const url = URL.createObjectURL(blob);
-      recordingUrlsRef.current[recording.id] = url;
-      setRecordingUrls((current) => ({ ...current, [recording.id]: url }));
-    } catch (error) {
-      window.alert(error.message);
-    }
-  };
   const saveStatus = async () => {
     setSavingStatus(true);
     try {
@@ -2492,10 +1891,6 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             <b>{candidate.designation}</b>
           </div>
           <div>
-            <small>Overall score</small>
-            <b>{candidate.percentage}%</b>
-          </div>
-          <div>
             <small>Assessment status</small>
             <b>{candidate.status}</b>
           </div>
@@ -2512,34 +1907,6 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             <b>{candidate.address || "Not provided"}</b>
           </div>
         </div>
-        <div className="candidate-files">
-          <button className="secondary" disabled={!candidate.resume} onClick={() => downloadResume(candidate).catch((error) => window.alert(error.message))}>
-            <Download /> {candidate.resume ? `Download ${candidate.resume.name}` : "No resume (legacy record)"}
-          </button>
-        </div>
-        {detail?.ai_rejection_reason && (
-          <div className="ai-rejection">
-            <ShieldCheck />
-            <span><b>Automated proctoring rejection</b><small>{detail.ai_rejection_reason}</small></span>
-          </div>
-        )}
-        {detail?.recordings?.length > 0 && (
-          <>
-            <h3>Proctored assessment recordings</h3>
-            <div className="recording-list">
-              {detail.recordings.map((recording) => (
-                <div key={recording.id}>
-                  <span><Video /><b>{recording.kind === "screen" ? "Screen" : "Camera & microphone"} · {roundMeta[recording.round]?.title || recording.round}</b><small>{Math.round(recording.size / 1024)} KB · {recording.completed_at ? "Complete" : "Processing"}</small></span>
-                  {!recordingUrls[recording.id] ? (
-                    <button className="secondary" onClick={() => viewRecording(recording)}><Play /> View recording</button>
-                  ) : (
-                    <video controls src={recordingUrls[recording.id]} />
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
         <div className="workflow-editor">
           <h3>Update recruitment status</h3>
           <select
@@ -2566,7 +1933,7 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             {savingStatus ? "Saving…" : "Save status"}
           </button>
         </div>
-        <h3>Round performance</h3>
+        <h3>Stage progress</h3>
         {!candidate.rounds.length && (
           <div className="drawer-loading">No rounds started in the current assessment.</div>
         )}
@@ -2574,14 +1941,9 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
           <div className="round-result" key={r.round_type}>
             <span>
               {roundMeta[r.round_type]?.title}
-              <small>
-                {r.passed_tests}/{r.total_tests} coding tests · {r.violations}{" "}
-                violations
-              </small>
+              <small>{r.status}</small>
             </span>
-            <b>
-              {r.score}/{r.max_score}
-            </b>
+            <b>{r.status === "in_progress" ? "In progress" : "Submitted"}</b>
           </div>
         ))}
         {detail?.previous_assessments?.length > 0 && (
@@ -2599,9 +1961,9 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
                   <div className="round-result" key={round.round_type}>
                     <span>
                       {roundMeta[round.round_type]?.title}
-                      <small>{round.status} · {round.violations} violations</small>
+                      <small>{round.status}</small>
                     </span>
-                    <b>{round.score}/{round.max_score}</b>
+                    <b>{round.status === "in_progress" ? "In progress" : "Submitted"}</b>
                   </div>
                 ))}
               </div>
@@ -2615,21 +1977,13 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
           <div className="response-list">
             {detail.responses.map((r, i) => (
               <div key={i}>
-                <span className={r.correct ? "dot-good" : "dot-bad"} />
+                <span className="dot-good" />
                 <p>
                   <b>{r.question.split("\n")[0]}</b>
                   <small>
-                    {r.round} ·{" "}
-                    {r.timed_out
-                      ? "Timed out"
-                      : r.total_tests
-                        ? `${r.passed_tests}/${r.total_tests} tests passed`
-                        : r.correct
-                          ? "Correct"
-                          : "Incorrect"}
+                    {r.round} · {r.timed_out ? "Timed out" : "Submitted"}
                   </small>
                 </p>
-                <strong>{r.score}</strong>
               </div>
             ))}
           </div>

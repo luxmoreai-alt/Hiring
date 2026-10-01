@@ -1,15 +1,11 @@
 import os
 import random
 import re
-from pathlib import Path
-from urllib.parse import quote
 from decimal import Decimal
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
-from django.db.models import Sum
-from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view
@@ -20,50 +16,16 @@ from .auth import make_token, read_token
 from .deletion import delete_candidates
 from .emails import send_completion_email, send_registration_email
 from .models import (AssessmentReset, Attempt, Candidate, CandidateStatusHistory,
-                     ProctorEvent, ProctorRecording, ProctorRecordingChunk,
                      Question, Response)
 from .runner import DEFAULT_STARTERS, available_languages, run_code
 
 ROUND_ORDER = ["aptitude", "technical", "coding"]
 ROUND_LIMITS = {"aptitude": 60, "technical": 20, "coding": 2}
-ROUND_PASS_SCORES = {"aptitude": Decimal("30"), "technical": Decimal("10"), "coding": Decimal("10")}
-ROUND_LABELS = {"aptitude": "Cognitive aptitude", "technical": "Technical aptitude", "coding": "Coding challenge"}
 QUESTION_SECONDS = {"aptitude": 60, "technical": 60, "coding": 1200}
-MAX_RESUME_BYTES = 3 * 1024 * 1024
-RESUME_TYPES = {
-    ".pdf": {"application/pdf"},
-    ".doc": {"application/msword", "application/octet-stream"},
-    ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/zip", "application/octet-stream"},
-    ".odt": {"application/vnd.oasis.opendocument.text", "application/zip", "application/octet-stream"},
-    ".odf": {"application/vnd.oasis.opendocument.formula", "application/zip", "application/octet-stream"},
-}
 
 
 def normalized_college(value):
     return " ".join(str(value).split()).casefold()
-
-
-def validate_resume(upload):
-    if not upload:
-        raise ValidationError("A resume is required.")
-    name = Path(str(upload.name).replace("\\", "/")).name[:255]
-    extension = Path(name).suffix.lower()
-    if extension not in RESUME_TYPES:
-        raise ValidationError("Resume must be a PDF, Word (.doc/.docx), or OpenDocument (.odt/.odf) file. Images are not accepted.")
-    if upload.size > MAX_RESUME_BYTES:
-        raise ValidationError("Resume must be 3 MB or smaller.")
-    content_type = (getattr(upload, "content_type", "") or "application/octet-stream").lower()
-    if content_type not in RESUME_TYPES[extension]:
-        raise ValidationError("The uploaded file content type does not match an allowed document format.")
-    header = upload.read(8)
-    upload.seek(0)
-    if extension == ".pdf" and not header.startswith(b"%PDF-"):
-        raise ValidationError("The uploaded file is not a valid PDF document.")
-    if extension == ".doc" and not header.startswith(bytes.fromhex("D0CF11E0A1B11AE1")):
-        raise ValidationError("The uploaded file is not a valid Word document.")
-    if extension in (".docx", ".odt", ".odf") and not header.startswith(b"PK"):
-        raise ValidationError("The uploaded file is not a valid zipped document.")
-    return name, content_type, upload.read()
 
 
 def candidate_for(request):
@@ -103,9 +65,7 @@ def candidate_data(candidate, detailed=False, include_results=False):
         "preferred_location": candidate.preferred_location, "preferred_location_label": candidate.get_preferred_location_display(),
         "status": candidate.status, "hiring_status": candidate.hiring_status,
         "hiring_status_label": candidate.get_hiring_status_display(), "registered_at": candidate.registered_at,
-        "access_locked": candidate.access_locked, "assessment_cycle": candidate.assessment_cycle,
-        "resume": ({"name": candidate.resume_name, "size": candidate.resume_size}
-                   if candidate.resume_name else None),
+        "access_locked": False, "assessment_cycle": candidate.assessment_cycle,
         "ai_rejection_reason": candidate.ai_rejection_reason,
         "ai_rejected_at": candidate.ai_rejected_at,
     }
@@ -115,15 +75,12 @@ def candidate_data(candidate, detailed=False, include_results=False):
                 else candidate.attempts.filter(assessment_cycle=candidate.assessment_cycle))
     data["rounds"] = [{
         "round_type": a.round_type, "status": a.status,
-        **({"score": float(a.score), "max_score": float(a.max_score), "passed_tests": a.passed_tests,
-        "total_tests": a.total_tests, "violations": a.violation_count} if include_results else {}),
+        **({"passed_tests": a.passed_tests, "total_tests": a.total_tests} if include_results else {}),
     } for a in attempts]
     if detailed:
-        data["proctor_events"] = [{"type": e.event_type, "at": e.created_at, "details": e.details} for e in candidate.proctor_events.order_by("-created_at")]
         data["responses"] = [{
             "round": r.attempt.round_type, "question": r.question.prompt,
-            "category": r.question.category, "correct": r.is_correct, "score": float(r.score),
-            "passed_tests": r.passed_tests, "total_tests": r.total_tests, "timed_out": r.timed_out,
+            "category": r.question.category, "timed_out": r.timed_out,
         } for r in Response.objects.filter(attempt__candidate=candidate, attempt__assessment_cycle=candidate.assessment_cycle).select_related("attempt", "question")]
         data["previous_assessments"] = [{
             "assessment_cycle": reset.assessment_cycle, "status": reset.status_before_reset,
@@ -131,9 +88,7 @@ def candidate_data(candidate, detailed=False, include_results=False):
             "reset_by": reset.reset_by.username if reset.reset_by else "System",
             "rounds": [{
                 "round_type": attempt.round_type, "status": attempt.status,
-                "score": float(attempt.score), "max_score": float(attempt.max_score),
                 "passed_tests": attempt.passed_tests, "total_tests": attempt.total_tests,
-                "violations": attempt.violation_count,
             } for attempt in candidate.attempts.filter(assessment_cycle=reset.assessment_cycle)],
         } for reset in candidate.assessment_resets.select_related("reset_by").all()]
         data["status_history"] = [{
@@ -141,13 +96,6 @@ def candidate_data(candidate, detailed=False, include_results=False):
             "to_status_label": h.get_to_status_display(), "note": h.note,
             "changed_by": h.changed_by.username if h.changed_by else "System", "created_at": h.created_at,
         } for h in candidate.status_history.select_related("changed_by").all()]
-        data["recordings"] = [{
-            "id": recording.id, "round": recording.attempt.round_type,
-            "kind": recording.kind,
-            "started_at": recording.started_at, "completed_at": recording.completed_at,
-            "size": recording.total_size, "chunks": recording.chunk_count,
-            "mime_type": recording.mime_type,
-        } for recording in candidate.proctor_recordings.select_related("attempt").all()]
     return data
 
 
@@ -193,9 +141,8 @@ def attempt_state(attempt):
     total = len(attempt.question_ids)
     payload = {
         "id": attempt.id, "round_type": attempt.round_type, "status": attempt.status,
-        "current": attempt.current_index, "total": total, "score": float(attempt.score),
-        "pass_score": float(ROUND_PASS_SCORES[attempt.round_type]),
-        "question_seconds": QUESTION_SECONDS[attempt.round_type], "violations": attempt.violation_count,
+        "current": attempt.current_index, "total": total,
+        "question_seconds": QUESTION_SECONDS[attempt.round_type],
     }
     if attempt.status == "in_progress" and attempt.current_index < total:
         question = cached_question(attempt.question_ids[attempt.current_index])
@@ -216,26 +163,7 @@ def advance(attempt, auto=False):
         attempt.completed_at = timezone.now()
         attempt.question_started_at = None
         candidate = attempt.candidate
-        pass_score = ROUND_PASS_SCORES[attempt.round_type]
-        if attempt.score < pass_score:
-            old_hiring_status = candidate.hiring_status
-            candidate.status = attempt.round_type
-            candidate.hiring_status = "rejected"
-            candidate.hiring_status_updated_at = timezone.now()
-            candidate.ai_rejection_reason = (
-                f"You scored {float(attempt.score):g}/{float(attempt.max_score):g} in the "
-                f"{ROUND_LABELS[attempt.round_type]} round. A minimum score of "
-                f"{float(pass_score):g} is required to continue."
-            )
-            candidate.ai_rejected_at = timezone.now()
-            CandidateStatusHistory.objects.create(
-                candidate=candidate,
-                from_status=old_hiring_status,
-                to_status="rejected",
-                note=f"Assessment threshold: {candidate.ai_rejection_reason}",
-                changed_by=None,
-            )
-        elif attempt.round_type == "aptitude":
+        if attempt.round_type == "aptitude":
             candidate.status = "technical"
         elif attempt.round_type == "technical":
             candidate.status = "coding"
@@ -300,31 +228,20 @@ def register(request):
                 setattr(existing, field, str(request.data[field]).strip())
             existing.phone, existing.address = phone, address
             existing.college, existing.college_normalized = college, college_key
-            if request.FILES.get("resume"):
-                try:
-                    existing.resume_name, existing.resume_content_type, existing.resume_data = validate_resume(request.FILES["resume"])
-                    existing.resume_size = len(existing.resume_data)
-                except ValidationError as error:
-                    return ApiResponse({"detail": error.message}, status=400)
             existing.attempts.all().delete()
             existing.proctor_events.all().delete()
             existing.status = "registered"
             existing.completed_at = None
             existing.hiring_status = "assessment_pending"
             existing.hiring_status_updated_at = timezone.now()
-            existing.save(update_fields=[*required, "college_normalized", "resume_name", "resume_content_type", "resume_size", "resume_data", "status", "completed_at", "hiring_status", "hiring_status_updated_at"])
+            existing.save(update_fields=[*required, "college_normalized", "status", "completed_at", "hiring_status", "hiring_status_updated_at"])
             return ApiResponse({"token": make_token(existing.id), "candidate": candidate_data(existing), "restarted": True})
         if existing.phone == phone:
             return ApiResponse({"token": make_token(existing.id), "candidate": candidate_data(existing), "resumed": True})
         return ApiResponse({"detail": "This email is already registered with a different phone number. Contact the recruiter for help."}, status=409)
-    try:
-        resume_name, resume_content_type, resume_data = validate_resume(request.FILES.get("resume"))
-    except ValidationError as error:
-        return ApiResponse({"detail": error.message}, status=400)
     values = {field: str(request.data[field]).strip() for field in required if field != "email"}
     values.update(phone=phone, address=address, college=college, college_normalized=college_key)
-    candidate = Candidate.objects.create(**values, email=email, resume_name=resume_name,
-                                         resume_content_type=resume_content_type, resume_size=len(resume_data), resume_data=resume_data)
+    candidate = Candidate.objects.create(**values, email=email)
     send_registration_email(candidate)
     return ApiResponse({"token": make_token(candidate.id), "candidate": candidate_data(candidate)}, status=201)
 
@@ -339,8 +256,6 @@ def start_round(request, round_type):
     candidate = candidate_for(request)
     if candidate.hiring_status == "rejected":
         return ApiResponse({"detail": candidate.ai_rejection_reason or "This assessment has ended."}, status=423)
-    if candidate.access_locked:
-        return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
     if round_type not in ROUND_ORDER:
         return ApiResponse({"detail": "Unknown round"}, status=404)
     expected = "aptitude" if candidate.status == "registered" else candidate.status
@@ -370,8 +285,6 @@ def round_state(request, round_type):
     candidate = candidate_for(request)
     if candidate.hiring_status == "rejected":
         return ApiResponse({"detail": candidate.ai_rejection_reason or "This assessment has ended."}, status=423)
-    if candidate.access_locked:
-        return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
     attempt = Attempt.objects.filter(
         candidate=candidate,
         round_type=round_type,
@@ -389,8 +302,6 @@ def submit_answer(request, round_type):
     candidate = candidate_for(request)
     if candidate.hiring_status == "rejected":
         return ApiResponse({"detail": candidate.ai_rejection_reason or "This assessment has ended."}, status=423)
-    if candidate.access_locked:
-        return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
     attempt = Attempt.objects.select_for_update().filter(
         candidate=candidate,
         round_type=round_type,
@@ -452,8 +363,6 @@ def submit_answer(request, round_type):
 @api_view(["POST"])
 def try_code(request, round_type):
     candidate = candidate_for(request)
-    if candidate.access_locked:
-        return ApiResponse({"detail": "Assessment access is locked after leaving the exam. Contact the administrator for a reset."}, status=423)
     attempt = Attempt.objects.filter(
         candidate=candidate,
         round_type=round_type,
@@ -475,110 +384,6 @@ def try_code(request, round_type):
 
 
 @api_view(["POST"])
-def proctor_event(request):
-    event_type = request.data.get("event_type", "unknown")[:40]
-    with transaction.atomic():
-        candidate = Candidate.objects.select_for_update().get(id=read_token(request))
-        attempt = candidate.attempts.filter(
-            assessment_cycle=candidate.assessment_cycle, status="in_progress"
-        ).first()
-        details = request.data.get("details", {})
-        ProctorEvent.objects.create(candidate=candidate, attempt=attempt, event_type=event_type, details=details)
-        severe_events = {
-            "fullscreen_exit": "Candidate left the mandatory fullscreen assessment.",
-            "tab_hidden": "Candidate switched away from the assessment tab.",
-            "page_exit": "Candidate left or closed the assessment page.",
-            "multiple_faces": "Automated camera monitoring detected more than one face.",
-            "camera_disabled": "Camera access or the camera stream was disabled during the assessment.",
-            "microphone_disabled": "Microphone access or the microphone stream was disabled during the assessment.",
-            "screen_share_stopped": "Candidate stopped sharing their screen during the assessment.",
-        }
-        repeated_face_missing = event_type == "face_missing" and candidate.proctor_events.filter(
-            attempt=attempt, event_type="face_missing"
-        ).count() >= 3
-        rejection_reason = severe_events.get(event_type)
-        if repeated_face_missing:
-            rejection_reason = "Automated camera monitoring could not detect the candidate's face in three checks."
-        if attempt and (rejection_reason or event_type == "window_blur"):
-            attempt.violation_count += 1
-            attempt.status = "terminated"
-            attempt.completed_at = timezone.now()
-            attempt.question_started_at = None
-            attempt.save(update_fields=["violation_count", "status", "completed_at", "question_started_at"])
-            candidate.access_locked = True
-            if rejection_reason:
-                old_status = candidate.hiring_status
-                candidate.hiring_status = "rejected"
-                candidate.hiring_status_updated_at = timezone.now()
-                candidate.ai_rejection_reason = rejection_reason
-                candidate.ai_rejected_at = timezone.now()
-                CandidateStatusHistory.objects.create(
-                    candidate=candidate, from_status=old_status, to_status="rejected",
-                    note=f"Automated proctoring: {rejection_reason}", changed_by=None,
-                )
-            candidate.save(update_fields=["access_locked", "hiring_status", "hiring_status_updated_at", "ai_rejection_reason", "ai_rejected_at"])
-    return ApiResponse({
-        "logged": True,
-        "violations": attempt.violation_count if attempt else 0,
-        "access_locked": candidate.access_locked,
-        "rejected": candidate.hiring_status == "rejected",
-        "rejection_reason": candidate.ai_rejection_reason,
-    })
-
-
-@api_view(["POST"])
-def recording_start(request):
-    candidate = candidate_for(request)
-    attempt = candidate.attempts.filter(assessment_cycle=candidate.assessment_cycle, status="in_progress").first()
-    if not attempt:
-        return ApiResponse({"detail": "No active assessment to record."}, status=409)
-    mime_type = str(request.data.get("mime_type", "video/webm"))[:100]
-    kind = str(request.data.get("kind", "camera"))
-    if kind not in {value for value, _ in ProctorRecording.KIND_CHOICES}:
-        return ApiResponse({"detail": "Invalid recording type."}, status=400)
-    recording = ProctorRecording.objects.create(candidate=candidate, attempt=attempt, kind=kind, mime_type=mime_type)
-    return ApiResponse({"id": recording.id}, status=201)
-
-
-@api_view(["POST"])
-def recording_chunk(request, recording_id):
-    candidate = candidate_for(request)
-    try:
-        sequence = int(request.query_params.get("sequence", "0"))
-    except ValueError:
-        return ApiResponse({"detail": "Invalid recording sequence."}, status=400)
-    if sequence < 0 or sequence > 2000:
-        return ApiResponse({"detail": "Invalid recording sequence."}, status=400)
-    content = request.body
-    if not content or len(content) > 2 * 1024 * 1024:
-        return ApiResponse({"detail": "Recording chunk must be between 1 byte and 2 MB."}, status=400)
-    with transaction.atomic():
-        recording = get_object_or_404(
-            ProctorRecording.objects.select_for_update(), id=recording_id, candidate=candidate
-        )
-        existing = recording.chunks.filter(sequence=sequence).only("id", "data").first()
-        old_size = len(existing.data) if existing else 0
-        if existing:
-            existing.data = content
-            existing.save(update_fields=["data"])
-        else:
-            ProctorRecordingChunk.objects.create(recording=recording, sequence=sequence, data=content)
-            recording.chunk_count += 1
-        recording.total_size = max(0, recording.total_size - old_size + len(content))
-        recording.save(update_fields=["chunk_count", "total_size"])
-    return ApiResponse({"stored": True, "sequence": sequence})
-
-
-@api_view(["POST"])
-def recording_finish(request, recording_id):
-    candidate = candidate_for(request)
-    recording = get_object_or_404(ProctorRecording, id=recording_id, candidate=candidate)
-    recording.completed_at = timezone.now()
-    recording.save(update_fields=["completed_at"])
-    return ApiResponse({"completed": True})
-
-
-@api_view(["POST"])
 def admin_login(request):
     user = authenticate(username=request.data.get("username"), password=request.data.get("password"))
     if not user or not user.is_staff: return ApiResponse({"detail": "Invalid administrator credentials"}, status=401)
@@ -593,17 +398,10 @@ def require_admin(request):
 @api_view(["GET"])
 def admin_dashboard(request):
     require_admin(request)
-    candidates = list(Candidate.objects.defer("resume_data").prefetch_related("attempts").order_by("-registered_at"))
-    rows = []
-    for candidate in candidates:
-        item = candidate_data(candidate, include_results=True)
-        item["total_score"] = sum(r["score"] for r in item["rounds"])
-        item["total_max"] = sum(r["max_score"] for r in item["rounds"])
-        item["percentage"] = round(100 * item["total_score"] / item["total_max"], 1) if item["total_max"] else 0
-        rows.append(item)
-    rows.sort(key=lambda row: row["percentage"], reverse=True)
+    candidates = list(Candidate.objects.prefetch_related("attempts").order_by("-registered_at"))
+    rows = [candidate_data(candidate, include_results=True) for candidate in candidates]
     return ApiResponse({
-        "summary": {"registered": len(rows), "completed": sum(1 for r in rows if r["status"] == "completed"), "average": round(sum(r["percentage"] for r in rows) / len(rows), 1) if rows else 0, "top_score": rows[0]["percentage"] if rows else 0},
+        "summary": {"registered": len(rows), "completed": sum(1 for r in rows if r["status"] == "completed")},
         "candidates": rows,
     })
 
@@ -612,36 +410,6 @@ def admin_dashboard(request):
 def admin_candidate(request, candidate_id):
     require_admin(request)
     return ApiResponse(candidate_data(get_object_or_404(Candidate, id=candidate_id), detailed=True, include_results=True))
-
-
-@api_view(["GET"])
-def admin_candidate_resume(request, candidate_id):
-    require_admin(request)
-    candidate = get_object_or_404(Candidate, id=candidate_id)
-    if not candidate.resume_data:
-        return ApiResponse({"detail": "No resume was uploaded for this candidate."}, status=404)
-    response = HttpResponse(bytes(candidate.resume_data), content_type=candidate.resume_content_type or "application/octet-stream")
-    safe_ascii = re.sub(r"[^A-Za-z0-9._-]", "_", candidate.resume_name) or "resume"
-    response["Content-Disposition"] = f"attachment; filename=\"{safe_ascii}\"; filename*=UTF-8''{quote(candidate.resume_name)}"
-    response["Content-Length"] = len(candidate.resume_data)
-    return response
-
-
-@api_view(["GET"])
-def admin_recording(request, recording_id):
-    require_admin(request)
-    recording = get_object_or_404(ProctorRecording, id=recording_id)
-    if "sequence" in request.query_params:
-        try:
-            sequence = int(request.query_params["sequence"])
-        except ValueError:
-            return ApiResponse({"detail": "Invalid recording sequence."}, status=400)
-        chunk = get_object_or_404(recording.chunks, sequence=sequence)
-        return HttpResponse(bytes(chunk.data), content_type=recording.mime_type)
-    chunks = recording.chunks.order_by("sequence")
-    response = StreamingHttpResponse((bytes(chunk.data) for chunk in chunks.iterator()), content_type=recording.mime_type)
-    response["Content-Disposition"] = f'inline; filename="assessment-{recording.id}.webm"'
-    return response
 
 
 @api_view(["DELETE"])
