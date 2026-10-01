@@ -1,7 +1,6 @@
 import os
 import random
 import re
-from decimal import Decimal
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
@@ -75,7 +74,6 @@ def candidate_data(candidate, detailed=False, include_results=False):
                 else candidate.attempts.filter(assessment_cycle=candidate.assessment_cycle))
     data["rounds"] = [{
         "round_type": a.round_type, "status": a.status,
-        **({"passed_tests": a.passed_tests, "total_tests": a.total_tests} if include_results else {}),
     } for a in attempts]
     if detailed:
         data["responses"] = [{
@@ -88,7 +86,6 @@ def candidate_data(candidate, detailed=False, include_results=False):
             "reset_by": reset.reset_by.username if reset.reset_by else "System",
             "rounds": [{
                 "round_type": attempt.round_type, "status": attempt.status,
-                "passed_tests": attempt.passed_tests, "total_tests": attempt.total_tests,
             } for attempt in candidate.attempts.filter(assessment_cycle=reset.assessment_cycle)],
         } for reset in candidate.assessment_resets.select_related("reset_by").all()]
         data["status_history"] = [{
@@ -237,6 +234,39 @@ def register(request):
             existing.save(update_fields=[*required, "college_normalized", "status", "completed_at", "hiring_status", "hiring_status_updated_at"])
             return ApiResponse({"token": make_token(existing.id), "candidate": candidate_data(existing), "restarted": True})
         if existing.phone == phone:
+            if existing.hiring_status == "rejected":
+                with transaction.atomic():
+                    existing = Candidate.objects.select_for_update().get(id=existing.id)
+                    AssessmentReset.objects.create(
+                        candidate=existing,
+                        assessment_cycle=existing.assessment_cycle,
+                        status_before_reset=existing.status,
+                        reset_by=None,
+                    )
+                    for field in required:
+                        if field != "email":
+                            setattr(existing, field, str(request.data[field]).strip())
+                    existing.phone, existing.address = phone, address
+                    existing.college, existing.college_normalized = college, college_key
+                    existing.assessment_cycle += 1
+                    existing.status = "registered"
+                    existing.access_locked = False
+                    existing.completed_at = None
+                    existing.hiring_status = "assessment_pending"
+                    existing.hiring_status_updated_at = timezone.now()
+                    existing.ai_rejection_reason = ""
+                    existing.ai_rejected_at = None
+                    existing.save(update_fields=[
+                        "name", "phone", "college", "college_normalized", "designation",
+                        "address", "role", "preferred_location", "assessment_cycle",
+                        "status", "access_locked", "completed_at", "hiring_status",
+                        "hiring_status_updated_at", "ai_rejection_reason", "ai_rejected_at",
+                    ])
+                return ApiResponse({
+                    "token": make_token(existing.id),
+                    "candidate": candidate_data(existing),
+                    "restarted": True,
+                })
             return ApiResponse({"token": make_token(existing.id), "candidate": candidate_data(existing), "resumed": True})
         return ApiResponse({"detail": "This email is already registered with a different phone number. Contact the recruiter for help."}, status=409)
     values = {field: str(request.data[field]).strip() for field in required if field != "email"}
@@ -340,22 +370,11 @@ def submit_answer(request, round_type):
         if language not in allowed_languages:
             return ApiResponse({"detail": "Unsupported language"}, status=400)
         code = request.data.get("code", "")
-        results = (evaluate_react_solution(code, question.test_cases)
-                   if react_workspace else run_code(code, language, question.test_cases))
-        passed = sum(1 for result in results if result["passed"])
         response.code, response.language = code, language
-        response.passed_tests, response.total_tests = passed, len(results)
-        response.score = Decimal("10") * Decimal(passed) / max(1, len(results))
-        response.is_correct = passed == len(results)
-        attempt.passed_tests += passed
-        attempt.total_tests += len(results)
     elif not timed_out:
         try: response.selected_option = int(request.data.get("selected_option"))
         except (TypeError, ValueError): response.selected_option = None
-        response.is_correct = response.selected_option == question.correct_option
-        response.score = 1 if response.is_correct else 0
     response.save()
-    attempt.score += response.score
     advance(attempt)
     return ApiResponse({"accepted": True, "timed_out": timed_out, "state": attempt_state(attempt)})
 

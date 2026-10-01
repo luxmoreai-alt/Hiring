@@ -413,7 +413,7 @@ function Landing() {
           <p>
             Luxmor TalentForge is Luxmor AI Technologies&apos; secure campus
             recruitment and online assessment portal. It brings candidate
-            registration, timed evaluations, practical coding, and recruiter
+            registration, timed stages, practical coding, and recruiter
             review into one focused hiring experience.
           </p>
         </div>
@@ -554,7 +554,7 @@ function Portal() {
                     ) : (
                       <button disabled={!active} onClick={() => start(type)}>
                         {record
-                          ? "Resume stage"
+                          ? "Continue stage"
                           : active
                             ? "View instructions"
                             : "Complete previous stage"}
@@ -917,7 +917,7 @@ function Assessment() {
             </p>
             <h4>
               {q.workspace === "react"
-                ? "Evaluation checklist"
+                ? "Requirements checklist"
                 : "Sample test cases"}
             </h4>
             {q.workspace === "react" ? (

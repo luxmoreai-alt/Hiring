@@ -143,6 +143,35 @@ class AssessmentFlowTests(TestCase):
         self.assertTrue(response.data["resumed"])
         self.assertEqual(response.data["candidate"]["id"], first["candidate"]["id"])
 
+    def test_rejected_candidate_can_restart_with_the_same_email_and_phone(self):
+        registration = self.register_candidate()
+        candidate = Candidate.objects.get(id=registration["candidate"]["id"])
+        candidate.status = "aptitude"
+        candidate.hiring_status = "rejected"
+        candidate.ai_rejection_reason = "Recruiter decision"
+        candidate.save(update_fields=["status", "hiring_status", "ai_rejection_reason"])
+        old_attempt = candidate.attempts.create(
+            round_type="aptitude", assessment_cycle=1, question_ids=[1], status="completed",
+        )
+
+        self.client.credentials()
+        response = self.client.post("/api/candidates/register/", {
+            "name": "Test Student", "email": "student@example.com", "phone": "9876543210",
+            "college": "Example Institute", "designation": "B.Tech CSE",
+            "address": "12 Example Road, Hyderabad 500001", "address_confirmed": True,
+            "role": "mern-stack-developer", "preferred_location": "hyderabad",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["restarted"])
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.assessment_cycle, 2)
+        self.assertEqual(candidate.status, "registered")
+        self.assertEqual(candidate.hiring_status, "assessment_pending")
+        self.assertEqual(candidate.ai_rejection_reason, "")
+        self.assertTrue(candidate.attempts.filter(id=old_attempt.id, assessment_cycle=1).exists())
+        self.assertTrue(AssessmentReset.objects.filter(candidate=candidate, assessment_cycle=1).exists())
+
     def test_college_names_are_normalized_for_filtering(self):
         first = Candidate.objects.create(name="A", email="college-a@example.com", phone="9999999999", college="Example   INSTITUTE", designation="B", address="X", role="data-analyst")
         second = Candidate.objects.create(name="B", email="college-b@example.com", phone="8888888888", college=" example institute ", designation="B", address="X", role="data-analyst")
