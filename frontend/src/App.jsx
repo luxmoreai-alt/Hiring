@@ -1777,7 +1777,7 @@ function AdminDashboard() {
                     <th>Hiring status</th>
                     <th>Assessment</th>
                     <th>Evaluation</th>
-                    <th />
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1821,25 +1821,27 @@ function AdminDashboard() {
                       </td>
                       <td><b className="score">{c.percentage}%</b></td>
                       <td>
-                        <button className="view-btn" onClick={() => open(c)}>
-                          <Eye />
-                        </button>
-                        <button
-                          className="reset-btn"
-                          aria-label={`Reset assessment for ${c.name}`}
-                          title="Reset assessment access"
-                          onClick={() => resetCandidate(c)}
-                        >
-                          <RotateCcw />
-                        </button>
-                        <button
-                          className="delete-btn"
-                          aria-label={`Delete ${c.name}`}
-                          title="Delete candidate"
-                          onClick={() => deleteCandidate(c)}
-                        >
-                          <Trash2 />
-                        </button>
+                        <div className="candidate-actions">
+                          <button className="view-btn" aria-label={`View ${c.name}`} title="View candidate" onClick={() => open(c)}>
+                            <Eye />
+                          </button>
+                          <button
+                            className="reset-btn"
+                            aria-label={`Reset assessment for ${c.name}`}
+                            title="Reset assessment access"
+                            onClick={() => resetCandidate(c)}
+                          >
+                            <RotateCcw />
+                          </button>
+                          <button
+                            className="delete-btn"
+                            aria-label={`Delete ${c.name}`}
+                            title="Delete candidate"
+                            onClick={() => deleteCandidate(c)}
+                          >
+                            <Trash2 />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

@@ -1479,6 +1479,20 @@ td {
 .view-btn svg {
   width: 14px;
 }
+.candidate-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 7px;
+  min-width: 98px;
+}
+.candidate-actions button {
+  flex: 0 0 28px;
+  display: inline-grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+}
 .device-check {
   display: grid;
   grid-template-columns: 150px 1fr;
@@ -1531,7 +1545,6 @@ td {
   border-radius: 6px;
   width: 28px;
   height: 28px;
-  margin-left: 7px;
 }
 .reset-btn {
   border: 0;
@@ -1540,7 +1553,6 @@ td {
   border-radius: 6px;
   width: 28px;
   height: 28px;
-  margin-left: 7px;
 }
 .reset-btn svg {
   width: 14px;
