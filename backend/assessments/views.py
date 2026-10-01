@@ -1,6 +1,7 @@
 import os
 import random
 import re
+from decimal import Decimal
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
@@ -75,11 +76,17 @@ def candidate_data(candidate, detailed=False, include_results=False):
                 else candidate.attempts.filter(assessment_cycle=candidate.assessment_cycle))
     data["rounds"] = [{
         "round_type": a.round_type, "status": a.status,
+        **({
+            "score": float(a.score), "max_score": float(a.max_score),
+            "passed_tests": a.passed_tests, "total_tests": a.total_tests,
+        } if include_results else {}),
     } for a in attempts]
     if detailed:
         data["responses"] = [{
             "round": r.attempt.round_type, "question": r.question.prompt,
-            "category": r.question.category, "timed_out": r.timed_out,
+            "category": r.question.category, "correct": r.is_correct,
+            "score": float(r.score), "passed_tests": r.passed_tests,
+            "total_tests": r.total_tests, "timed_out": r.timed_out,
         } for r in Response.objects.filter(attempt__candidate=candidate, attempt__assessment_cycle=candidate.assessment_cycle).select_related("attempt", "question")]
         data["previous_assessments"] = [{
             "assessment_cycle": reset.assessment_cycle, "status": reset.status_before_reset,
@@ -87,6 +94,8 @@ def candidate_data(candidate, detailed=False, include_results=False):
             "reset_by": reset.reset_by.username if reset.reset_by else "System",
             "rounds": [{
                 "round_type": attempt.round_type, "status": attempt.status,
+                "score": float(attempt.score), "max_score": float(attempt.max_score),
+                "passed_tests": attempt.passed_tests, "total_tests": attempt.total_tests,
             } for attempt in candidate.attempts.filter(assessment_cycle=reset.assessment_cycle)],
         } for reset in candidate.assessment_resets.select_related("reset_by").all()]
         data["status_history"] = [{
@@ -373,11 +382,22 @@ def submit_answer(request, round_type):
         if language not in allowed_languages:
             return ApiResponse({"detail": "Unsupported language"}, status=400)
         code = request.data.get("code", "")
+        results = (evaluate_react_solution(code, question.test_cases)
+                   if react_workspace else run_code(code, language, question.test_cases))
+        passed = sum(1 for result in results if result["passed"])
         response.code, response.language = code, language
+        response.passed_tests, response.total_tests = passed, len(results)
+        response.score = Decimal("10") * Decimal(passed) / max(1, len(results))
+        response.is_correct = passed == len(results)
+        attempt.passed_tests += passed
+        attempt.total_tests += len(results)
     elif not timed_out:
         try: response.selected_option = int(request.data.get("selected_option"))
         except (TypeError, ValueError): response.selected_option = None
+        response.is_correct = response.selected_option == question.correct_option
+        response.score = 1 if response.is_correct else 0
     response.save()
+    attempt.score += response.score
     advance(attempt)
     return ApiResponse({"accepted": True, "timed_out": timed_out, "state": attempt_state(attempt)})
 
@@ -421,7 +441,15 @@ def require_admin(request):
 def admin_dashboard(request):
     require_admin(request)
     candidates = list(Candidate.objects.prefetch_related("attempts").order_by("-registered_at"))
-    rows = [candidate_data(candidate, include_results=True) for candidate in candidates]
+    rows = []
+    for candidate in candidates:
+        item = candidate_data(candidate, include_results=True)
+        item["total_score"] = sum(round_result["score"] for round_result in item["rounds"])
+        item["total_max"] = sum(round_result["max_score"] for round_result in item["rounds"])
+        item["percentage"] = round(
+            100 * item["total_score"] / item["total_max"], 1
+        ) if item["total_max"] else 0
+        rows.append(item)
     return ApiResponse({
         "summary": {"registered": len(rows), "completed": sum(1 for r in rows if r["status"] == "completed")},
         "candidates": rows,

@@ -69,6 +69,26 @@ class AssessmentFlowTests(TestCase):
         self.assertNotIn("score", answered.data["state"])
         self.assertEqual(answered.data["state"]["current"], 1)
 
+    def test_evaluation_is_private_to_staff_and_does_not_reject(self):
+        registration = self.register_candidate()
+        started = self.client.post("/api/rounds/aptitude/start/", {}, format="json")
+        question = Question.objects.get(id=started.data["question"]["id"])
+        self.client.post("/api/rounds/aptitude/answer/", {
+            "question_id": question.id, "selected_option": question.correct_option,
+        }, format="json")
+
+        candidate_view = self.client.get("/api/candidates/me/")
+        self.assertNotIn("score", candidate_view.data["rounds"][0])
+
+        candidate = Candidate.objects.get(id=registration["candidate"]["id"])
+        self.assertEqual(candidate.hiring_status, "assessment_pending")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
+        dashboard = self.client.get("/api/staff/dashboard/")
+        evaluation = dashboard.data["candidates"][0]
+        self.assertEqual(evaluation["rounds"][0]["score"], 1.0)
+        self.assertEqual(evaluation["rounds"][0]["max_score"], 60.0)
+        self.assertEqual(evaluation["percentage"], 1.7)
+
     def test_registration_stores_college_name_in_capital_letters(self):
         registration = self.register_candidate()
         candidate = Candidate.objects.get(id=registration["candidate"]["id"])

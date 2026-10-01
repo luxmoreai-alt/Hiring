@@ -1358,7 +1358,8 @@ function AdminDashboard() {
   const downloadReport = () => {
     const columns = [
       "Student name", "Email", "Phone", "Gender", "College", "Degree / designation", "Role",
-      "Preferred location", "Hiring status", "Assessment status", "Registered at",
+      "Preferred location", "Hiring status", "Assessment status", "Overall evaluation",
+      "Aptitude evaluation", "Technical evaluation", "Coding evaluation", "Registered at",
     ];
     const csvCell = (value) => {
       const text = String(value ?? "");
@@ -1366,10 +1367,15 @@ function AdminDashboard() {
       return `"${spreadsheetSafe.replaceAll('"', '""')}"`;
     };
     const lines = reportCandidates.map((candidate) => {
+      const roundScore = (type) => {
+        const round = candidate.rounds.find((item) => item.round_type === type);
+        return round ? `${round.score}/${round.max_score}` : "Not attempted";
+      };
       return [
         candidate.name, candidate.email, candidate.phone, candidate.gender_label, candidate.college,
         candidate.designation, candidate.role_label, candidate.preferred_location_label,
-        candidate.hiring_status_label, candidate.status,
+        candidate.hiring_status_label, candidate.status, `${candidate.percentage}%`,
+        roundScore("aptitude"), roundScore("technical"), roundScore("coding"),
         candidate.registered_at ? new Date(candidate.registered_at).toLocaleString() : "",
       ].map(csvCell).join(",");
     });
@@ -1633,7 +1639,7 @@ function AdminDashboard() {
                 <div className="table-scroll report-table">
                   <table>
                     <thead>
-                      <tr><th>Student</th><th>Gender</th><th>College</th><th>Role</th><th>Result</th><th>Assessment</th><th>Details</th></tr>
+                      <tr><th>Student</th><th>Gender</th><th>College</th><th>Role</th><th>Result</th><th>Assessment</th><th>Evaluation</th><th>Details</th></tr>
                     </thead>
                     <tbody>
                       {reportCandidates.map((candidate) => (
@@ -1644,6 +1650,7 @@ function AdminDashboard() {
                           <td>{candidate.role_label}<br /><small>{candidate.preferred_location_label}</small></td>
                           <td><span className={`report-result ${candidate.hiring_status}`}>{candidate.hiring_status_label}</span></td>
                           <td>{candidate.status}</td>
+                          <td><b className="score">{candidate.percentage}%</b></td>
                           <td><button className="view-btn" aria-label={`View ${candidate.name}'s detailed report`} onClick={() => open(candidate)}><Eye /></button></td>
                         </tr>
                       ))}
@@ -1769,6 +1776,7 @@ function AdminDashboard() {
                     <th>Location</th>
                     <th>Hiring status</th>
                     <th>Assessment</th>
+                    <th>Evaluation</th>
                     <th />
                   </tr>
                 </thead>
@@ -1811,6 +1819,7 @@ function AdminDashboard() {
                           {c.status}
                         </span>
                       </td>
+                      <td><b className="score">{c.percentage}%</b></td>
                       <td>
                         <button className="view-btn" onClick={() => open(c)}>
                           <Eye />
@@ -1919,6 +1928,10 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             <small>Hiring status</small>
             <b>{candidate.hiring_status_label}</b>
           </div>
+          <div>
+            <small>Overall evaluation</small>
+            <b>{candidate.percentage}%</b>
+          </div>
           <div className="detail-wide address-detail">
             <small>Registered address</small>
             <b>{candidate.address || "Not provided"}</b>
@@ -1950,7 +1963,7 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             {savingStatus ? "Saving…" : "Save status"}
           </button>
         </div>
-        <h3>Stage progress</h3>
+        <h3>Round evaluations</h3>
         {!candidate.rounds.length && (
           <div className="drawer-loading">No rounds started in the current assessment.</div>
         )}
@@ -1958,9 +1971,12 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
           <div className="round-result" key={r.round_type}>
             <span>
               {roundMeta[r.round_type]?.title}
-              <small>{r.status}</small>
+              <small>
+                {r.status}
+                {r.total_tests ? ` · ${r.passed_tests}/${r.total_tests} coding tests passed` : ""}
+              </small>
             </span>
-            <b>{r.status === "in_progress" ? "In progress" : "Submitted"}</b>
+            <b>{r.score}/{r.max_score}</b>
           </div>
         ))}
         {detail?.previous_assessments?.length > 0 && (
@@ -1978,9 +1994,12 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
                   <div className="round-result" key={round.round_type}>
                     <span>
                       {roundMeta[round.round_type]?.title}
-                      <small>{round.status}</small>
+                      <small>
+                        {round.status}
+                        {round.total_tests ? ` · ${round.passed_tests}/${round.total_tests} coding tests passed` : ""}
+                      </small>
                     </span>
-                    <b>{round.status === "in_progress" ? "In progress" : "Submitted"}</b>
+                    <b>{round.score}/{round.max_score}</b>
                   </div>
                 ))}
               </div>
@@ -1994,13 +2013,20 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
           <div className="response-list">
             {detail.responses.map((r, i) => (
               <div key={i}>
-                <span className="dot-good" />
+                <span className={r.correct ? "dot-good" : "dot-bad"} />
                 <p>
                   <b>{r.question.split("\n")[0]}</b>
                   <small>
-                    {r.round} · {r.timed_out ? "Timed out" : "Submitted"}
+                    {r.round} · {r.timed_out
+                      ? "Timed out"
+                      : r.total_tests
+                        ? `${r.passed_tests}/${r.total_tests} tests passed`
+                        : r.correct
+                          ? "Correct"
+                          : "Incorrect"}
                   </small>
                 </p>
+                <strong>{r.score}</strong>
               </div>
             ))}
           </div>
