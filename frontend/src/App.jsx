@@ -654,9 +654,26 @@ function Instructions() {
     setLoading(true);
     setError("");
     try {
+      const enterFullscreen =
+        document.documentElement.requestFullscreen ||
+        document.documentElement.webkitRequestFullscreen;
+      if (!enterFullscreen) {
+        throw new Error("Fullscreen mode is required for this assessment. Please use a supported desktop browser.");
+      }
+      if (!(document.fullscreenElement || document.webkitFullscreenElement)) {
+        await enterFullscreen.call(document.documentElement);
+      }
       await request(`/rounds/${type}/start/`, { method: "POST" });
       navigate(`/assessment/${type}`);
     } catch (err) {
+      const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
+      if ((document.fullscreenElement || document.webkitFullscreenElement) && exitFullscreen) {
+        try {
+          await exitFullscreen.call(document);
+        } catch {
+          // The browser may already have left fullscreen after a rejected request.
+        }
+      }
       setError(err.message);
       setLoading(false);
     }
@@ -692,9 +709,9 @@ function Instructions() {
           <div>
             <ShieldCheck />
             <span>
-              <b>Complete each stage independently</b>
+              <b>Fullscreen is required</b>
               <small>
-                Use your own knowledge and submit every answer before its timer expires.
+                The stage opens in fullscreen. Leaving fullscreen blocks the test until you return and is recorded as a violation.
               </small>
             </span>
           </div>
@@ -743,7 +760,15 @@ function Assessment() {
   const [busy, setBusy] = useState(false);
   const [runResults, setRunResults] = useState(null);
   const [error, setError] = useState("");
+  const [fullscreenBlocked, setFullscreenBlocked] = useState(
+    () => !(document.fullscreenElement || document.webkitFullscreenElement),
+  );
   const submitting = useRef(false);
+  const wasFullscreen = useRef(
+    Boolean(document.fullscreenElement || document.webkitFullscreenElement),
+  );
+  const intentionalFullscreenExit = useRef(false);
+  const initialMissingReported = useRef(false);
   const load = useCallback(async () => {
     try {
       const data = await request(`/rounds/${type}/state/`);
@@ -829,6 +854,15 @@ function Assessment() {
         setCode(data.state.question.starter_code[nextLanguage] || "");
       }
       if (data.state.status !== "in_progress") {
+        intentionalFullscreenExit.current = true;
+        const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
+        if ((document.fullscreenElement || document.webkitFullscreenElement) && exitFullscreen) {
+          try {
+            await exitFullscreen.call(document);
+          } catch {
+            // Completion must still continue if the browser exits fullscreen itself.
+          }
+        }
         navigate("/portal");
       }
     } catch (e) {
@@ -851,6 +885,49 @@ function Assessment() {
   submitRef.current = submit;
   const activeQuestionId = state?.question?.id;
   const assessmentActive = state?.status === "in_progress";
+  const recordFullscreenViolation = useCallback(async () => {
+    try {
+      const data = await request(`/rounds/${type}/fullscreen-violation/`, {
+        method: "POST",
+      });
+      setState((current) =>
+        current ? { ...current, violation_count: data.violation_count } : current,
+      );
+    } catch (violationError) {
+      if (![409, 423].includes(violationError.status)) {
+        setError("The fullscreen violation could not be recorded. Your test remains paused until fullscreen is restored.");
+      }
+    }
+  }, [type]);
+  useEffect(() => {
+    if (!assessmentActive) return;
+    const onFullscreenChange = () => {
+      const isFullscreen = Boolean(
+        document.fullscreenElement || document.webkitFullscreenElement,
+      );
+      setFullscreenBlocked(!isFullscreen);
+      if (
+        wasFullscreen.current &&
+        !isFullscreen &&
+        !intentionalFullscreenExit.current
+      ) {
+        recordFullscreenViolation();
+      }
+      wasFullscreen.current = isFullscreen;
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+
+    // Reloading closes browser fullscreen before React can observe the exit.
+    if (!wasFullscreen.current && !initialMissingReported.current) {
+      initialMissingReported.current = true;
+      recordFullscreenViolation();
+    }
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+    };
+  }, [assessmentActive, recordFullscreenViolation]);
   useEffect(() => {
     if (!assessmentActive) return;
     const tick = setInterval(
@@ -890,6 +967,21 @@ function Assessment() {
       setBusy(false);
     }
   };
+  const restoreFullscreen = async () => {
+    setError("");
+    const enterFullscreen =
+      document.documentElement.requestFullscreen ||
+      document.documentElement.webkitRequestFullscreen;
+    if (!enterFullscreen) {
+      setError("Fullscreen mode is not supported by this browser. Open the assessment in a supported desktop browser.");
+      return;
+    }
+    try {
+      await enterFullscreen.call(document.documentElement);
+    } catch {
+      setError("Fullscreen was not enabled. Please allow fullscreen to continue the assessment.");
+    }
+  };
   if (!state && error) return <Navigate to="/portal" replace />;
   if (!state) return <Loader />;
   if (state.status !== "in_progress") return <Navigate to="/portal" />;
@@ -899,6 +991,28 @@ function Assessment() {
   const urgent = remaining <= (type === "coding" ? 120 : 10);
   return (
     <div className={`test-page ${type === "coding" ? "coding-page" : ""}`}>
+      {fullscreenBlocked && (
+        <div
+          className="fullscreen-block"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="fullscreen-title"
+        >
+          <div>
+            <LockKeyhole />
+            <h2 id="fullscreen-title">Fullscreen required</h2>
+            <p>
+              You left fullscreen mode. This exit has been recorded as a violation.
+              The assessment timer continues while your test is locked. Return to
+              fullscreen to continue.
+            </p>
+            <button className="primary" onClick={restoreFullscreen}>
+              Return to fullscreen
+            </button>
+            {error && <div className="error-box">{error}</div>}
+          </div>
+        </div>
+      )}
       <header className="test-header">
         <Brand />
         <div className="test-title">
@@ -914,6 +1028,9 @@ function Assessment() {
             {String(seconds).padStart(2, "0")}
           </b>
         </div>
+        <span className="violation">
+          <ShieldCheck size={15} /> Violations: {state.violation_count || 0}
+        </span>
       </header>
       <div className="test-progress">
         <i style={{ width: `${((state.current + 1) / state.total) * 100}%` }} />
@@ -1359,7 +1476,7 @@ function AdminDashboard() {
     const columns = [
       "Student name", "Email", "Phone", "Gender", "College", "Degree / designation", "Role",
       "Preferred location", "Hiring status", "Assessment status", "Overall evaluation",
-      "Aptitude evaluation", "Technical evaluation", "Coding evaluation", "Registered at",
+      "Aptitude evaluation", "Technical evaluation", "Coding evaluation", "Fullscreen violations", "Registered at",
     ];
     const csvCell = (value) => {
       const text = String(value ?? "");
@@ -1375,7 +1492,7 @@ function AdminDashboard() {
         candidate.name, candidate.email, candidate.phone, candidate.gender_label, candidate.college,
         candidate.designation, candidate.role_label, candidate.preferred_location_label,
         candidate.hiring_status_label, candidate.status, `${candidate.percentage}%`,
-        roundScore("aptitude"), roundScore("technical"), roundScore("coding"),
+        roundScore("aptitude"), roundScore("technical"), roundScore("coding"), candidate.total_violations || 0,
         candidate.registered_at ? new Date(candidate.registered_at).toLocaleString() : "",
       ].map(csvCell).join(",");
     });
@@ -1777,6 +1894,7 @@ function AdminDashboard() {
                     <th>Hiring status</th>
                     <th>Assessment</th>
                     <th>Evaluation</th>
+                    <th>Violations</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -1820,6 +1938,11 @@ function AdminDashboard() {
                         </span>
                       </td>
                       <td><b className="score">{c.percentage}%</b></td>
+                      <td>
+                        <b className={c.total_violations ? "violation-count has-violations" : "violation-count"}>
+                          {c.total_violations || 0}
+                        </b>
+                      </td>
                       <td>
                         <div className="candidate-actions">
                           <button className="view-btn" aria-label={`View ${c.name}`} title="View candidate" onClick={() => open(c)}>
@@ -1934,6 +2057,12 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             <small>Overall evaluation</small>
             <b>{candidate.percentage}%</b>
           </div>
+          <div>
+            <small>Fullscreen violations</small>
+            <b className={candidate.total_violations ? "has-violations" : ""}>
+              {candidate.total_violations || 0}
+            </b>
+          </div>
           <div className="detail-wide address-detail">
             <small>Registered address</small>
             <b>{candidate.address || "Not provided"}</b>
@@ -1975,6 +2104,7 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
               {roundMeta[r.round_type]?.title}
               <small>
                 {r.status}
+                {` · ${r.violation_count || 0} fullscreen violation${r.violation_count === 1 ? "" : "s"}`}
                 {r.total_tests ? ` · ${r.passed_tests}/${r.total_tests} coding tests passed` : ""}
               </small>
             </span>
@@ -1998,6 +2128,7 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
                       {roundMeta[round.round_type]?.title}
                       <small>
                         {round.status}
+                        {` · ${round.violation_count || 0} fullscreen violation${round.violation_count === 1 ? "" : "s"}`}
                         {round.total_tests ? ` · ${round.passed_tests}/${round.total_tests} coding tests passed` : ""}
                       </small>
                     </span>

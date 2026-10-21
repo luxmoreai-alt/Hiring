@@ -111,6 +111,26 @@ class AssessmentFlowTests(TestCase):
         candidate = Candidate.objects.get(id=registration["candidate"]["id"])
         self.assertEqual(candidate.attempts.get(round_type="aptitude").responses.count(), 1)
 
+    def test_fullscreen_exit_is_recorded_and_visible_to_staff(self):
+        registration = self.register_candidate()
+        self.client.post("/api/rounds/aptitude/start/", {}, format="json")
+
+        first = self.client.post("/api/rounds/aptitude/fullscreen-violation/", {}, format="json")
+        second = self.client.post("/api/rounds/aptitude/fullscreen-violation/", {}, format="json")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.data["violation_count"], 2)
+
+        candidate = Candidate.objects.get(id=registration["candidate"]["id"])
+        attempt = candidate.attempts.get(round_type="aptitude")
+        self.assertEqual(attempt.violation_count, 2)
+        self.assertEqual(attempt.proctor_events.filter(event_type="fullscreen_exit").count(), 2)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
+        dashboard = self.client.get("/api/staff/dashboard/")
+        result = dashboard.data["candidates"][0]
+        self.assertEqual(result["total_violations"], 2)
+        self.assertEqual(result["rounds"][0]["violation_count"], 2)
+
     def test_every_completed_round_advances_without_a_score_threshold(self):
         cases = [
             ("aptitude", "aptitude", "technical", "assessment_pending"),

@@ -6,6 +6,7 @@ from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
+from django.db.models import F
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view
@@ -16,7 +17,7 @@ from .auth import make_token, read_token
 from .deletion import delete_candidates
 from .emails import send_completion_email, send_registration_email
 from .models import (AssessmentReset, Attempt, Candidate, CandidateStatusHistory,
-                     Question, Response)
+                     ProctorEvent, Question, Response)
 from .runner import DEFAULT_STARTERS, available_languages, run_code
 
 ROUND_ORDER = ["aptitude", "technical", "coding"]
@@ -79,8 +80,11 @@ def candidate_data(candidate, detailed=False, include_results=False):
         **({
             "score": float(a.score), "max_score": float(a.max_score),
             "passed_tests": a.passed_tests, "total_tests": a.total_tests,
+            "violation_count": a.violation_count,
         } if include_results else {}),
     } for a in attempts]
+    if include_results:
+        data["total_violations"] = sum(a.violation_count for a in attempts)
     if detailed:
         data["responses"] = [{
             "round": r.attempt.round_type, "question": r.question.prompt,
@@ -96,6 +100,7 @@ def candidate_data(candidate, detailed=False, include_results=False):
                 "round_type": attempt.round_type, "status": attempt.status,
                 "score": float(attempt.score), "max_score": float(attempt.max_score),
                 "passed_tests": attempt.passed_tests, "total_tests": attempt.total_tests,
+                "violation_count": attempt.violation_count,
             } for attempt in candidate.attempts.filter(assessment_cycle=reset.assessment_cycle)],
         } for reset in candidate.assessment_resets.select_related("reset_by").all()]
         data["status_history"] = [{
@@ -150,6 +155,7 @@ def attempt_state(attempt):
         "id": attempt.id, "round_type": attempt.round_type, "status": attempt.status,
         "current": attempt.current_index, "total": total,
         "question_seconds": QUESTION_SECONDS[attempt.round_type],
+        "violation_count": attempt.violation_count,
     }
     if attempt.status == "in_progress" and attempt.current_index < total:
         question = cached_question(attempt.question_ids[attempt.current_index])
@@ -336,6 +342,29 @@ def round_state(request, round_type):
         return ApiResponse({"detail": "This assessment attempt is no longer available. Return to the assessment centre."}, status=409)
     warm_questions(attempt.question_ids)
     return ApiResponse(attempt_state(attempt))
+
+
+@api_view(["POST"])
+@transaction.atomic
+def record_fullscreen_violation(request, round_type):
+    candidate = candidate_for(request)
+    attempt = Attempt.objects.select_for_update().filter(
+        candidate=candidate,
+        round_type=round_type,
+        assessment_cycle=candidate.assessment_cycle,
+    ).first()
+    if not attempt or attempt.status != "in_progress":
+        return ApiResponse({"detail": "This assessment round is not active."}, status=409)
+
+    Attempt.objects.filter(id=attempt.id).update(violation_count=F("violation_count") + 1)
+    attempt.refresh_from_db(fields=["violation_count"])
+    ProctorEvent.objects.create(
+        candidate=candidate,
+        attempt=attempt,
+        event_type="fullscreen_exit",
+        details={"round_type": round_type, "count": attempt.violation_count},
+    )
+    return ApiResponse({"violation_count": attempt.violation_count})
 
 
 @api_view(["POST"])

@@ -752,6 +752,22 @@ textarea:focus {
   align-items: center;
   gap: 5px;
 }
+.violation-count {
+  display: inline-grid;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  place-items: center;
+  border-radius: 999px;
+  background: #f1f0f4;
+  color: var(--muted);
+}
+.has-violations {
+  color: var(--red) !important;
+}
+.violation-count.has-violations {
+  background: #fff0f1;
+}
 .test-progress {
   height: 3px;
   background: #e8e6ef;
@@ -1069,6 +1085,10 @@ textarea:focus {
   color: #aaa5ba;
   line-height: 1.6;
   margin-bottom: 25px;
+}
+.fullscreen-block .error-box {
+  margin-top: 16px;
+  text-align: left;
 }
 .admin-login {
   min-height: 100vh;
