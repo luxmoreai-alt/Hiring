@@ -299,7 +299,10 @@ class AssessmentFlowTests(TestCase):
     @patch("assessments.runner._judge0_request")
     def test_judge0_catalogue_is_used_when_configured(self, request):
         _judge0_languages_cache.update(expires=0, languages=[])
-        request.return_value = [{"id": 71, "name": "Python (3.8.1)"}, {"id": 63, "name": "JavaScript (Node.js 12.14.0)"}]
+        request.return_value = [
+            {"id": 63, "name": "JavaScript (Node.js 12.14.0)"},
+            {"id": 71, "name": "Python (3.8.1)"},
+        ]
         self.assertEqual(available_languages(), [
             {"value": "judge0:71", "label": "Python (3.8.1)"},
             {"value": "judge0:63", "label": "JavaScript (Node.js 12.14.0)"},

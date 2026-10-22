@@ -74,6 +74,17 @@ def _judge0_languages():
             for item in languages
             if isinstance(item, dict) and item.get("id") is not None and item.get("name")
         ]
+        preferred_order = ("python (3", "python", "javascript", "typescript", "java")
+
+        def language_order(item):
+            label = item["label"].casefold()
+            priority = next(
+                (index for index, name in enumerate(preferred_order) if label.startswith(name)),
+                len(preferred_order),
+            )
+            return priority, label
+
+        result.sort(key=language_order)
         _judge0_languages_cache.update(expires=now + 300, languages=result)
         return result
     except RuntimeError:

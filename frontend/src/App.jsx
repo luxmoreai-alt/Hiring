@@ -663,6 +663,13 @@ function Instructions() {
       if (!(document.fullscreenElement || document.webkitFullscreenElement)) {
         await enterFullscreen.call(document.documentElement);
       }
+      if (navigator.keyboard?.lock) {
+        try {
+          await navigator.keyboard.lock(["Escape"]);
+        } catch {
+          throw new Error("Allow the browser's keyboard-lock permission to start the assessment securely.");
+        }
+      }
       await request(`/rounds/${type}/start/`, { method: "POST" });
       navigate(`/assessment/${type}`);
     } catch (err) {
@@ -674,6 +681,7 @@ function Instructions() {
           // The browser may already have left fullscreen after a rejected request.
         }
       }
+      navigator.keyboard?.unlock?.();
       setError(err.message);
       setLoading(false);
     }
@@ -863,6 +871,7 @@ function Assessment() {
             // Completion must still continue if the browser exits fullscreen itself.
           }
         }
+        navigator.keyboard?.unlock?.();
         navigate("/portal");
       }
     } catch (e) {
@@ -907,6 +916,9 @@ function Assessment() {
         document.fullscreenElement || document.webkitFullscreenElement,
       );
       setFullscreenBlocked(!isFullscreen);
+      if (!isFullscreen) {
+        navigator.keyboard?.unlock?.();
+      }
       if (
         wasFullscreen.current &&
         !isFullscreen &&
@@ -1026,8 +1038,17 @@ function Assessment() {
     }
     try {
       await enterFullscreen.call(document.documentElement);
+      if (navigator.keyboard?.lock) {
+        try {
+          await navigator.keyboard.lock(["Escape"]);
+        } catch {
+          const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
+          if (exitFullscreen) await exitFullscreen.call(document);
+          throw new Error("Keyboard lock permission was not allowed.");
+        }
+      }
     } catch {
-      setError("Fullscreen was not enabled. Please allow fullscreen to continue the assessment.");
+      setError("Fullscreen keyboard lock was not enabled. Allow the requested browser permission to continue.");
     }
   };
   if (!state && error) return <Navigate to="/portal" replace />;
