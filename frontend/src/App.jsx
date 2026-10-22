@@ -711,7 +711,7 @@ function Instructions() {
             <span>
               <b>Fullscreen is required</b>
               <small>
-                The stage opens in fullscreen. Leaving fullscreen blocks the test until you return and is recorded as a violation.
+                The stage opens in fullscreen. Leaving fullscreen, opening the context menu, or using restricted browser shortcuts is recorded as a violation.
               </small>
             </span>
           </div>
@@ -885,17 +885,18 @@ function Assessment() {
   submitRef.current = submit;
   const activeQuestionId = state?.question?.id;
   const assessmentActive = state?.status === "in_progress";
-  const recordFullscreenViolation = useCallback(async () => {
+  const recordProctoringViolation = useCallback(async (eventType) => {
     try {
-      const data = await request(`/rounds/${type}/fullscreen-violation/`, {
+      const data = await request(`/rounds/${type}/violation/`, {
         method: "POST",
+        body: JSON.stringify({ event_type: eventType }),
       });
       setState((current) =>
         current ? { ...current, violation_count: data.violation_count } : current,
       );
     } catch (violationError) {
       if (![409, 423].includes(violationError.status)) {
-        setError("The fullscreen violation could not be recorded. Your test remains paused until fullscreen is restored.");
+        setError("The proctoring violation could not be recorded. Please check your connection.");
       }
     }
   }, [type]);
@@ -911,7 +912,7 @@ function Assessment() {
         !isFullscreen &&
         !intentionalFullscreenExit.current
       ) {
-        recordFullscreenViolation();
+        recordProctoringViolation("fullscreen_exit");
       }
       wasFullscreen.current = isFullscreen;
     };
@@ -921,13 +922,60 @@ function Assessment() {
     // Reloading closes browser fullscreen before React can observe the exit.
     if (!wasFullscreen.current && !initialMissingReported.current) {
       initialMissingReported.current = true;
-      recordFullscreenViolation();
+      recordProctoringViolation("fullscreen_exit");
     }
     return () => {
       document.removeEventListener("fullscreenchange", onFullscreenChange);
       document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
     };
-  }, [assessmentActive, recordFullscreenViolation]);
+  }, [assessmentActive, recordProctoringViolation]);
+  useEffect(() => {
+    if (!assessmentActive) return;
+
+    const blockContextMenu = (event) => {
+      event.preventDefault();
+      recordProctoringViolation("context_menu");
+    };
+    const blockRestrictedShortcut = (event) => {
+      const key = event.key.toLowerCase();
+      const command = event.ctrlKey || event.metaKey;
+      const developerTools =
+        key === "f12" ||
+        (command && event.shiftKey && ["i", "j", "c"].includes(key)) ||
+        (event.metaKey && event.altKey && ["i", "j", "c"].includes(key)) ||
+        (command && key === "u");
+      const navigationOrBrowserAction =
+        key === "f5" ||
+        (command && ["r", "s", "p"].includes(key)) ||
+        (event.altKey && ["arrowleft", "arrowright"].includes(key));
+
+      // Escape is reserved by browsers. preventDefault is best-effort; the
+      // fullscreenchange handler enforces and records the exit if it occurs.
+      if (key === "escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (!developerTools && !navigationOrBrowserAction) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) {
+        recordProctoringViolation(
+          developerTools
+            ? "developer_tools_shortcut"
+            : "blocked_navigation_shortcut",
+        );
+      }
+    };
+
+    document.addEventListener("contextmenu", blockContextMenu, true);
+    window.addEventListener("keydown", blockRestrictedShortcut, true);
+    return () => {
+      document.removeEventListener("contextmenu", blockContextMenu, true);
+      window.removeEventListener("keydown", blockRestrictedShortcut, true);
+    };
+  }, [assessmentActive, recordProctoringViolation]);
   useEffect(() => {
     if (!assessmentActive) return;
     const tick = setInterval(
@@ -1476,7 +1524,7 @@ function AdminDashboard() {
     const columns = [
       "Student name", "Email", "Phone", "Gender", "College", "Degree / designation", "Role",
       "Preferred location", "Hiring status", "Assessment status", "Overall evaluation",
-      "Aptitude evaluation", "Technical evaluation", "Coding evaluation", "Fullscreen violations", "Registered at",
+      "Aptitude evaluation", "Technical evaluation", "Coding evaluation", "Proctoring violations", "Registered at",
     ];
     const csvCell = (value) => {
       const text = String(value ?? "");
@@ -2058,7 +2106,7 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             <b>{candidate.percentage}%</b>
           </div>
           <div>
-            <small>Fullscreen violations</small>
+            <small>Proctoring violations</small>
             <b className={candidate.total_violations ? "has-violations" : ""}>
               {candidate.total_violations || 0}
             </b>
@@ -2104,7 +2152,7 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
               {roundMeta[r.round_type]?.title}
               <small>
                 {r.status}
-                {` · ${r.violation_count || 0} fullscreen violation${r.violation_count === 1 ? "" : "s"}`}
+                {` · ${r.violation_count || 0} proctoring violation${r.violation_count === 1 ? "" : "s"}`}
                 {r.total_tests ? ` · ${r.passed_tests}/${r.total_tests} coding tests passed` : ""}
               </small>
             </span>
@@ -2128,7 +2176,7 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
                       {roundMeta[round.round_type]?.title}
                       <small>
                         {round.status}
-                        {` · ${round.violation_count || 0} fullscreen violation${round.violation_count === 1 ? "" : "s"}`}
+                        {` · ${round.violation_count || 0} proctoring violation${round.violation_count === 1 ? "" : "s"}`}
                         {round.total_tests ? ` · ${round.passed_tests}/${round.total_tests} coding tests passed` : ""}
                       </small>
                     </span>

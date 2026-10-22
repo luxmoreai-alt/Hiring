@@ -115,15 +115,20 @@ class AssessmentFlowTests(TestCase):
         registration = self.register_candidate()
         self.client.post("/api/rounds/aptitude/start/", {}, format="json")
 
-        first = self.client.post("/api/rounds/aptitude/fullscreen-violation/", {}, format="json")
-        second = self.client.post("/api/rounds/aptitude/fullscreen-violation/", {}, format="json")
+        first = self.client.post("/api/rounds/aptitude/violation/", {
+            "event_type": "fullscreen_exit",
+        }, format="json")
+        second = self.client.post("/api/rounds/aptitude/violation/", {
+            "event_type": "developer_tools_shortcut",
+        }, format="json")
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.data["violation_count"], 2)
 
         candidate = Candidate.objects.get(id=registration["candidate"]["id"])
         attempt = candidate.attempts.get(round_type="aptitude")
         self.assertEqual(attempt.violation_count, 2)
-        self.assertEqual(attempt.proctor_events.filter(event_type="fullscreen_exit").count(), 2)
+        self.assertEqual(attempt.proctor_events.filter(event_type="fullscreen_exit").count(), 1)
+        self.assertEqual(attempt.proctor_events.filter(event_type="developer_tools_shortcut").count(), 1)
 
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
         dashboard = self.client.get("/api/staff/dashboard/")

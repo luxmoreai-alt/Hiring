@@ -346,7 +346,7 @@ def round_state(request, round_type):
 
 @api_view(["POST"])
 @transaction.atomic
-def record_fullscreen_violation(request, round_type):
+def record_proctoring_violation(request, round_type):
     candidate = candidate_for(request)
     attempt = Attempt.objects.select_for_update().filter(
         candidate=candidate,
@@ -356,12 +356,22 @@ def record_fullscreen_violation(request, round_type):
     if not attempt or attempt.status != "in_progress":
         return ApiResponse({"detail": "This assessment round is not active."}, status=409)
 
+    allowed_event_types = {
+        "fullscreen_exit",
+        "context_menu",
+        "developer_tools_shortcut",
+        "blocked_navigation_shortcut",
+    }
+    event_type = str(request.data.get("event_type", "fullscreen_exit"))
+    if event_type not in allowed_event_types:
+        return ApiResponse({"detail": "Unknown proctoring event."}, status=400)
+
     Attempt.objects.filter(id=attempt.id).update(violation_count=F("violation_count") + 1)
     attempt.refresh_from_db(fields=["violation_count"])
     ProctorEvent.objects.create(
         candidate=candidate,
         attempt=attempt,
-        event_type="fullscreen_exit",
+        event_type=event_type,
         details={"round_type": round_type, "count": attempt.violation_count},
     )
     return ApiResponse({"violation_count": attempt.violation_count})

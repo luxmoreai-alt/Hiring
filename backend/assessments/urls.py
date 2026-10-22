@@ -7,7 +7,7 @@ urlpatterns = [
     path("candidates/me/", views.me),
     path("rounds/<str:round_type>/start/", views.start_round),
     path("rounds/<str:round_type>/state/", views.round_state),
-    path("rounds/<str:round_type>/fullscreen-violation/", views.record_fullscreen_violation),
+    path("rounds/<str:round_type>/violation/", views.record_proctoring_violation),
     path("rounds/<str:round_type>/answer/", views.submit_answer),
     path("rounds/<str:round_type>/run/", views.try_code),
     path("staff/login/", views.admin_login),
