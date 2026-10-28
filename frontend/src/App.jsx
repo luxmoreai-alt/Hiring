@@ -348,13 +348,13 @@ function Landing() {
                 rows="2"
                 value={form.address}
                 onChange={set("address")}
-                placeholder="Enter your full permanent address as shown on Aadhaar"
+                placeholder="e.g. Mahatma Gandhi Road, opposite to 1MG Mall, Bengaluru, Karnataka 560042"
                 minLength="20"
                 pattern=".*[1-9][0-9]{5}.*"
               />
               <small className="field-help">
-                Please enter your full permanent address exactly as on your
-                Aadhaar. It will be used for office-letter processing.
+                Use this format: street or road, nearby landmark, city, state,
+                and 6-digit PIN code. Enter the address exactly as on Aadhaar.
               </small>
             </label>
             <div className="field-row">
@@ -2191,6 +2191,9 @@ function CandidateDrawer({ candidate, detail, close, updateStatus, onOfferCreate
     joining_date: "",
     annual_ctc: "",
     reference: `LUX/HR/${new Date().getFullYear()}/`,
+    location: candidate.preferred_location === "not_provided"
+      ? "Chennai"
+      : candidate.preferred_location_label,
   });
   const [creatingOffer, setCreatingOffer] = useState(false);
   const [offerError, setOfferError] = useState("");
@@ -2335,6 +2338,16 @@ function CandidateDrawer({ candidate, detail, close, updateStatus, onOfferCreate
                   value={offerForm.annual_ctc}
                   onChange={(event) => setOfferForm({ ...offerForm, annual_ctc: event.target.value })}
                   placeholder="e.g. 300000"
+                  required
+                />
+              </label>
+              <label>
+                Job location
+                <input
+                  value={offerForm.location}
+                  maxLength="120"
+                  onChange={(event) => setOfferForm({ ...offerForm, location: event.target.value })}
+                  placeholder="e.g. Bengaluru"
                   required
                 />
               </label>

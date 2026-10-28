@@ -121,6 +121,7 @@ class AssessmentFlowTests(TestCase):
                     "joining_date": "2026-12-01",
                     "annual_ctc": 360000,
                     "reference": "LUX/HR/2026/101",
+                    "location": "Bengaluru",
                 },
                 format="json",
             )
@@ -134,6 +135,8 @@ class AssessmentFlowTests(TestCase):
         self.assertEqual(outbound_offer["name"], "TEST STUDENT")
         self.assertEqual(outbound_offer["ctc"], 360000)
         self.assertEqual(outbound_offer["joiningDate"], "2026-12-01")
+        self.assertEqual(outbound_offer["location"], "Bengaluru")
+        self.assertEqual(outbound_offer["salutation"], "Mr.")
         candidate = Candidate.objects.get(id=registration["candidate"]["id"])
         self.assertEqual(candidate.offer_studio_id, offer_id)
 

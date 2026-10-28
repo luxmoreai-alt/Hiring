@@ -605,6 +605,7 @@ def admin_candidate_offer(request, candidate_id):
 
     joining_date = str(request.data.get("joining_date", "")).strip()
     reference = str(request.data.get("reference", "")).strip()
+    location = " ".join(str(request.data.get("location", "")).split())
     try:
         annual_ctc = int(request.data.get("annual_ctc", 0))
     except (TypeError, ValueError):
@@ -621,12 +622,11 @@ def admin_candidate_offer(request, candidate_id):
         return ApiResponse({"detail": "Annual CTC must be greater than zero."}, status=400)
     if not reference or len(reference) > 100:
         return ApiResponse({"detail": "Enter a reference number up to 100 characters."}, status=400)
+    if not location or len(location) > 120:
+        return ApiResponse({"detail": "Enter a job location up to 120 characters."}, status=400)
     if not settings.OFFER_STUDIO_TOKEN:
         return ApiResponse({"detail": "Offer Studio integration is not configured on the hiring server."}, status=503)
 
-    location = candidate.get_preferred_location_display()
-    if candidate.preferred_location == "not_provided":
-        location = "Chennai"
     salutation = "Ms." if candidate.gender == "female" else "Mr." if candidate.gender == "male" else "Mx."
     offer = {
         "documentType": "offer",
