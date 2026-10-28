@@ -1,7 +1,12 @@
 import os
 import random
 import re
+import json
+from datetime import date
 from decimal import Decimal
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
@@ -70,6 +75,12 @@ def candidate_data(candidate, detailed=False, include_results=False):
         "access_locked": False, "assessment_cycle": candidate.assessment_cycle,
         "ai_rejection_reason": candidate.ai_rejection_reason,
         "ai_rejected_at": candidate.ai_rejected_at,
+        "offer_studio_id": candidate.offer_studio_id,
+        "offer_studio_created_at": candidate.offer_studio_created_at,
+        "offer_studio_url": (
+            f"{settings.OFFER_STUDIO_URL}/?offer={candidate.offer_studio_id}"
+            if candidate.offer_studio_id else ""
+        ),
     }
     prefetched_attempts = getattr(candidate, "_prefetched_objects_cache", {}).get("attempts")
     attempts = ([attempt for attempt in prefetched_attempts if attempt.assessment_cycle == candidate.assessment_cycle]
@@ -578,3 +589,101 @@ def admin_candidate_status(request, candidate_id):
         note=str(request.data.get("note", "")).strip()[:1000], changed_by=admin_user,
     )
     return ApiResponse({"candidate": candidate_data(candidate, detailed=True, include_results=True)})
+
+
+@api_view(["POST"])
+def admin_candidate_offer(request, candidate_id):
+    require_admin(request)
+    candidate = get_object_or_404(Candidate, id=candidate_id)
+    if candidate.offer_studio_id:
+        return ApiResponse({
+            "detail": "An Offer Studio offer already exists for this candidate.",
+            "candidate": candidate_data(candidate, detailed=True, include_results=True),
+            "offer_id": candidate.offer_studio_id,
+            "offer_url": f"{settings.OFFER_STUDIO_URL}/?offer={candidate.offer_studio_id}",
+        }, status=409)
+
+    joining_date = str(request.data.get("joining_date", "")).strip()
+    reference = str(request.data.get("reference", "")).strip()
+    try:
+        annual_ctc = int(request.data.get("annual_ctc", 0))
+    except (TypeError, ValueError):
+        annual_ctc = 0
+    try:
+        parsed_joining_date = date.fromisoformat(joining_date)
+    except ValueError:
+        parsed_joining_date = None
+    if not parsed_joining_date:
+        return ApiResponse({"detail": "Enter a valid joining date."}, status=400)
+    if parsed_joining_date < timezone.localdate():
+        return ApiResponse({"detail": "Joining date cannot be in the past."}, status=400)
+    if annual_ctc <= 0:
+        return ApiResponse({"detail": "Annual CTC must be greater than zero."}, status=400)
+    if not reference or len(reference) > 100:
+        return ApiResponse({"detail": "Enter a reference number up to 100 characters."}, status=400)
+    if not settings.OFFER_STUDIO_TOKEN:
+        return ApiResponse({"detail": "Offer Studio integration is not configured on the hiring server."}, status=503)
+
+    location = candidate.get_preferred_location_display()
+    if candidate.preferred_location == "not_provided":
+        location = "Chennai"
+    salutation = "Ms." if candidate.gender == "female" else "Mr." if candidate.gender == "male" else "Mx."
+    offer = {
+        "documentType": "offer",
+        "salutation": salutation,
+        "name": candidate.name,
+        "email": candidate.email,
+        "mobile": candidate.phone,
+        "consultancy": "Direct",
+        "address": candidate.address,
+        "designation": candidate.get_role_display(),
+        "department": "Software Development",
+        "reportingTo": "Human Resource",
+        "employmentType": "Full-Time",
+        "workMode": "Work From Office",
+        "location": location,
+        "issueDate": timezone.localdate().isoformat(),
+        "joiningDate": joining_date,
+        "reference": reference,
+        "ctc": annual_ctc,
+        "probation": 6,
+        "noticePeriod": 60,
+        "acceptanceDays": 7,
+        "hiringCandidateId": str(candidate.id),
+    }
+    outbound = Request(
+        f"{settings.OFFER_STUDIO_API_URL}/api/offers",
+        data=json.dumps({"offer": offer}).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Mail-Token": settings.OFFER_STUDIO_TOKEN,
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(outbound, timeout=15) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        try:
+            message = json.loads(error.read().decode("utf-8")).get("error")
+        except (ValueError, AttributeError):
+            message = None
+        return ApiResponse({"detail": message or "Offer Studio rejected the offer."}, status=502)
+    except (URLError, TimeoutError, json.JSONDecodeError):
+        return ApiResponse({"detail": "Offer Studio could not be reached. Confirm that its backend is running."}, status=502)
+
+    saved_offer = result.get("offer") or {}
+    offer_id = str(saved_offer.get("id") or "").strip()
+    if not offer_id:
+        return ApiResponse({"detail": "Offer Studio returned an invalid save response."}, status=502)
+    candidate.offer_studio_id = offer_id
+    candidate.offer_studio_created_at = timezone.now()
+    candidate.save(update_fields=["offer_studio_id", "offer_studio_created_at"])
+    offer_url = f"{settings.OFFER_STUDIO_URL}/?offer={offer_id}"
+    return ApiResponse({
+        "created": True,
+        "offer_id": offer_id,
+        "offer_url": offer_url,
+        "candidate": candidate_data(candidate, detailed=True, include_results=True),
+    }, status=201)

@@ -1,4 +1,5 @@
 from decimal import Decimal
+import json
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.management import call_command
@@ -6,7 +7,7 @@ from django.db import connection
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from .auth import make_token
 from .emails import send_completion_email, send_registration_email
@@ -92,10 +93,49 @@ class AssessmentFlowTests(TestCase):
     def test_registration_stores_college_name_in_capital_letters(self):
         registration = self.register_candidate()
         candidate = Candidate.objects.get(id=registration["candidate"]["id"])
+        self.assertEqual(candidate.name, "TEST STUDENT")
+        self.assertEqual(registration["candidate"]["name"], "TEST STUDENT")
         self.assertEqual(candidate.college, "EXAMPLE INSTITUTE")
         self.assertEqual(registration["candidate"]["college"], "EXAMPLE INSTITUTE")
         self.assertEqual(candidate.gender, "male")
         self.assertEqual(registration["candidate"]["gender_label"], "Male")
+
+    @override_settings(
+        OFFER_STUDIO_API_URL="https://offer-api.example.com",
+        OFFER_STUDIO_URL="https://offer.example.com",
+        OFFER_STUDIO_TOKEN="test-offer-token",
+    )
+    def test_admin_can_create_and_link_offer_studio_offer(self):
+        registration = self.register_candidate()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {make_token(self.admin.id, 'admin')}")
+        offer_id = "e76e0cc8-0fb1-48ba-817d-ad4816de926e"
+        studio_response = MagicMock()
+        studio_response.__enter__.return_value.read.return_value = json.dumps({
+            "offer": {"id": offer_id},
+        }).encode("utf-8")
+
+        with patch("assessments.views.urlopen", return_value=studio_response) as mocked_open:
+            response = self.client.post(
+                f"/api/staff/candidates/{registration['candidate']['id']}/offer/",
+                {
+                    "joining_date": "2026-12-01",
+                    "annual_ctc": 360000,
+                    "reference": "LUX/HR/2026/101",
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["offer_id"], offer_id)
+        self.assertEqual(response.data["offer_url"], f"https://offer.example.com/?offer={offer_id}")
+        outbound_request = mocked_open.call_args.args[0]
+        self.assertEqual(outbound_request.headers["X-mail-token"], "test-offer-token")
+        outbound_offer = json.loads(outbound_request.data)["offer"]
+        self.assertEqual(outbound_offer["name"], "TEST STUDENT")
+        self.assertEqual(outbound_offer["ctc"], 360000)
+        self.assertEqual(outbound_offer["joiningDate"], "2026-12-01")
+        candidate = Candidate.objects.get(id=registration["candidate"]["id"])
+        self.assertEqual(candidate.offer_studio_id, offer_id)
 
     def test_duplicate_answer_returns_current_state_without_error(self):
         registration = self.register_candidate()

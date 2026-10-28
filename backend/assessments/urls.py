@@ -18,4 +18,5 @@ urlpatterns = [
     path("staff/rejected/delete-all/", views.admin_rejected_delete_all),
     path("staff/candidates/<uuid:candidate_id>/reset/", views.admin_candidate_reset),
     path("staff/candidates/<uuid:candidate_id>/status/", views.admin_candidate_status),
+    path("staff/candidates/<uuid:candidate_id>/offer/", views.admin_candidate_offer),
 ]

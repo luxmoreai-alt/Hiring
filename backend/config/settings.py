@@ -153,6 +153,9 @@ if VERCEL_HOST:
     if vercel_origin not in CSRF_TRUSTED_ORIGINS:
         CSRF_TRUSTED_ORIGINS.append(vercel_origin)
 FRONTEND_URL = os.getenv("FRONTEND_URL", f"https://{VERCEL_HOST}" if VERCEL_HOST else "http://localhost:5173").rstrip("/")
+OFFER_STUDIO_API_URL = os.getenv("OFFER_STUDIO_API_URL", "http://localhost:3000").rstrip("/")
+OFFER_STUDIO_URL = os.getenv("OFFER_STUDIO_URL", "http://localhost:5175").rstrip("/")
+OFFER_STUDIO_TOKEN = os.getenv("OFFER_STUDIO_TOKEN", "").strip()
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG

@@ -55,10 +55,15 @@ class Candidate(models.Model):
     resume_data = models.BinaryField(null=True, blank=True)
     ai_rejection_reason = models.TextField(blank=True)
     ai_rejected_at = models.DateTimeField(null=True, blank=True)
+    offer_studio_id = models.CharField(max_length=64, blank=True, db_index=True)
+    offer_studio_created_at = models.DateTimeField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
+        self.name = " ".join((self.name or "").split()).upper()
         self.college = " ".join((self.college or "").split()).upper()
         self.college_normalized = self.college.casefold()
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {"name"}
         super().save(*args, **kwargs)
 
     def __str__(self):

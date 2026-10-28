@@ -867,14 +867,78 @@ textarea:focus {
 }
 .coding-workspace {
   display: grid;
-  grid-template-columns: 42% 58%;
+  grid-template-columns: minmax(0, var(--problem-width, 42%)) 8px minmax(0, 1fr);
   height: calc(100vh - 70px);
 }
 .problem-pane {
   padding: 30px 35px;
   overflow: auto;
   background: #fff;
-  border-right: 1px solid var(--line);
+}
+.pane-resizer {
+  position: relative;
+  z-index: 5;
+  touch-action: none;
+  background: #302e3e;
+  outline: none;
+}
+.pane-resizer::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: #7165a5;
+  transition: background 0.15s, transform 0.15s;
+}
+.pane-resizer:hover::after,
+.pane-resizer:focus-visible::after {
+  background: #8b6cff;
+  transform: scale(1.2);
+}
+.horizontal-resizer {
+  cursor: col-resize;
+  border-left: 1px solid #dedbe8;
+  border-right: 1px solid #11101a;
+}
+.horizontal-resizer::after {
+  width: 3px;
+  height: 42px;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.horizontal-resizer:hover::after,
+.horizontal-resizer:focus-visible::after {
+  transform: translateY(-50%) scale(1.2);
+}
+.vertical-resizer {
+  height: 8px;
+  flex: 0 0 8px;
+  cursor: row-resize;
+  border-top: 1px solid #11101a;
+  border-bottom: 1px solid #3d3a4d;
+}
+.vertical-resizer::after {
+  width: 42px;
+  height: 3px;
+  left: 50%;
+  top: 2px;
+  transform: translateX(-50%);
+}
+.vertical-resizer:hover::after,
+.vertical-resizer:focus-visible::after {
+  transform: translateX(-50%) scale(1.2);
+}
+.pane-resizing,
+.pane-resizing * {
+  user-select: none !important;
+}
+.resizing-horizontal,
+.resizing-horizontal * {
+  cursor: col-resize !important;
+}
+.resizing-vertical,
+.resizing-vertical * {
+  cursor: row-resize !important;
 }
 .question-count {
   font-size: 12px;
@@ -952,12 +1016,12 @@ textarea:focus {
   box-shadow: none;
 }
 .react-editor-pane .code-editor {
-  flex: 0 0 46%;
-  min-height: 260px;
+  flex: 0 0 var(--code-height, 46%);
+  min-height: 140px;
 }
 .live-preview {
   flex: 1;
-  min-height: 260px;
+  min-height: 160px;
   background: #fff;
   border-top: 1px solid #302e3e;
   display: flex;
@@ -1697,6 +1761,77 @@ td {
   display: grid;
   gap: 9px;
 }
+.offer-studio-card {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 4px 12px;
+  align-items: center;
+  margin: 0 0 14px;
+  padding: 15px;
+  border: 1px solid #dcd5ff;
+  border-radius: 11px;
+  background: #faf9ff;
+}
+.offer-studio-icon {
+  grid-row: span 1;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: var(--purple);
+  background: #eee9ff;
+}
+.offer-studio-icon svg { width: 20px; }
+.offer-studio-card h3 { margin: 0; font-size: 15px; }
+.offer-studio-card p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.offer-studio-card small { display: block; margin-top: 4px; color: #746f82; font-size: 9px; }
+.offer-studio-card > .primary {
+  grid-column: 1 / -1;
+  justify-self: stretch;
+  justify-content: center;
+  margin-top: 9px;
+}
+.offer-studio-card > .primary svg { width: 16px; }
+.offer-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #171421a6;
+}
+.offer-dialog {
+  position: relative;
+  width: min(460px, 100%);
+  padding: 26px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 70px #1511224d;
+}
+.offer-dialog h2 { margin: 7px 35px 4px 0; font-size: 22px; }
+.offer-dialog > p { margin: 0 0 19px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.offer-dialog label { display: grid; gap: 6px; margin-top: 12px; font-size: 12px; font-weight: 700; color: #39344d; }
+.offer-dialog input { font-size: 14px; }
+.offer-dialog-close {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: #f3f2f7;
+  color: #464153;
+}
+.offer-dialog-close svg { width: 17px; }
+.offer-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }
+.offer-dialog-actions button { display: inline-flex; align-items: center; gap: 7px; }
+.offer-dialog-actions svg { width: 16px; }
 .workflow-editor h3 {
   margin: 0 0 3px;
   font-size: 16px;
@@ -1938,6 +2073,9 @@ td {
     grid-template-columns: 1fr;
     height: calc(100vh - 70px);
     overflow: auto;
+  }
+  .horizontal-resizer {
+    display: none;
   }
   .problem-pane,
   .editor-pane {

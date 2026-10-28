@@ -116,8 +116,22 @@ function reactPreviewDocument(code) {
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script>
 try {
+  const previewModules = {
+    react: window.React,
+    'react-dom': window.ReactDOM,
+    'react-dom/client': window.ReactDOM,
+  };
+  window.module = { exports: {} };
+  window.exports = window.module.exports;
+  window.require = function (name) {
+    if (previewModules[name]) return previewModules[name];
+    throw new Error('The live preview does not support importing "' + name + '".');
+  };
   const source = ${serialized};
-  const compiled = Babel.transform(source, { presets: ['react'] }).code;
+  const compiled = Babel.transform(source, {
+    presets: [['env', { modules: 'commonjs' }], 'react'],
+    sourceType: 'module',
+  }).code;
   (0, eval)(compiled);
   if (!window.__CandidateApp) throw new Error('Keep your component named App.');
   ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(window.__CandidateApp));
@@ -266,9 +280,10 @@ function Landing() {
               <input
                 required
                 value={form.name}
-                onChange={set("name")}
-                placeholder="e.g. Arjun Sharma"
+                onChange={(event) => setForm({ ...form, name: event.target.value.toUpperCase() })}
+                placeholder="E.G. ARJUN SHARMA"
               />
+              <small className="field-help">Your name will be saved in CAPITAL LETTERS.</small>
             </label>
             <div className="field-row">
               <label>
@@ -768,6 +783,10 @@ function Assessment() {
   const [busy, setBusy] = useState(false);
   const [runResults, setRunResults] = useState(null);
   const [error, setError] = useState("");
+  const [problemWidth, setProblemWidth] = useState(42);
+  const [codeHeight, setCodeHeight] = useState(46);
+  const codingWorkspace = useRef(null);
+  const reactEditorPane = useRef(null);
   const [fullscreenBlocked, setFullscreenBlocked] = useState(
     () => !(document.fullscreenElement || document.webkitFullscreenElement),
   );
@@ -1008,6 +1027,47 @@ function Assessment() {
     setLanguage(value);
     setCode(state.question.starter_code[value] || "");
   };
+  const startResize = (event, direction) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add("pane-resizing", `resizing-${direction}`);
+
+    const resize = (moveEvent) => {
+      if (direction === "horizontal") {
+        const rect = codingWorkspace.current?.getBoundingClientRect();
+        if (!rect) return;
+        const next = ((moveEvent.clientX - rect.left) / rect.width) * 100;
+        setProblemWidth(Math.min(68, Math.max(24, next)));
+      } else {
+        const rect = reactEditorPane.current?.getBoundingClientRect();
+        if (!rect) return;
+        const next = ((moveEvent.clientY - rect.top) / rect.height) * 100;
+        setCodeHeight(Math.min(70, Math.max(25, next)));
+      }
+    };
+    const stop = () => {
+      document.body.classList.remove("pane-resizing", `resizing-${direction}`);
+      handle.removeEventListener("pointermove", resize);
+      handle.removeEventListener("pointerup", stop);
+      handle.removeEventListener("pointercancel", stop);
+    };
+
+    handle.addEventListener("pointermove", resize);
+    handle.addEventListener("pointerup", stop);
+    handle.addEventListener("pointercancel", stop);
+  };
+  const resizeWithKeyboard = (event, direction) => {
+    if (direction === "horizontal" && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
+      event.preventDefault();
+      setProblemWidth((value) => Math.min(68, Math.max(24, value + (event.key === "ArrowRight" ? 2 : -2))));
+    }
+    if (direction === "vertical" && ["ArrowUp", "ArrowDown"].includes(event.key)) {
+      event.preventDefault();
+      setCodeHeight((value) => Math.min(70, Math.max(25, value + (event.key === "ArrowDown" ? 2 : -2))));
+    }
+  };
   const run = async () => {
     setBusy(true);
     setError("");
@@ -1105,7 +1165,11 @@ function Assessment() {
         <i style={{ width: `${((state.current + 1) / state.total) * 100}%` }} />
       </div>
       {type === "coding" ? (
-        <main className="coding-workspace">
+        <main
+          className="coding-workspace"
+          ref={codingWorkspace}
+          style={{ "--problem-width": `${problemWidth}%` }}
+        >
           <section className="problem-pane">
             <span className="question-count">Problem {state.current + 1}</span>
             <h2>{q.prompt.split("\n")[0]}</h2>
@@ -1137,7 +1201,24 @@ function Assessment() {
               ))
             )}
           </section>
-          <section className={`editor-pane ${q.workspace === "react" ? "react-editor-pane" : ""}`}>
+          <div
+            className="pane-resizer horizontal-resizer"
+            role="separator"
+            aria-label="Resize requirements and code panels"
+            aria-orientation="vertical"
+            aria-valuemin="24"
+            aria-valuemax="68"
+            aria-valuenow={Math.round(problemWidth)}
+            tabIndex="0"
+            title="Drag to resize panels"
+            onPointerDown={(event) => startResize(event, "horizontal")}
+            onKeyDown={(event) => resizeWithKeyboard(event, "horizontal")}
+          />
+          <section
+            className={`editor-pane ${q.workspace === "react" ? "react-editor-pane" : ""}`}
+            ref={reactEditorPane}
+            style={{ "--code-height": `${codeHeight}%` }}
+          >
             <div className="editor-bar">
               <select
                 value={language}
@@ -1167,15 +1248,30 @@ function Assessment() {
               className="code-editor"
             />
             {q.workspace === "react" && (
-              <div className="live-preview">
-                <div><b>Live preview</b><span>Updates automatically</span></div>
-                <iframe
-                  title="Candidate React preview"
-                  sandbox="allow-scripts"
-                  referrerPolicy="no-referrer"
-                  srcDoc={reactPreviewDocument(previewCode)}
+              <>
+                <div
+                  className="pane-resizer vertical-resizer"
+                  role="separator"
+                  aria-label="Resize code editor and live preview"
+                  aria-orientation="horizontal"
+                  aria-valuemin="25"
+                  aria-valuemax="70"
+                  aria-valuenow={Math.round(codeHeight)}
+                  tabIndex="0"
+                  title="Drag to resize editor and preview"
+                  onPointerDown={(event) => startResize(event, "vertical")}
+                  onKeyDown={(event) => resizeWithKeyboard(event, "vertical")}
                 />
-              </div>
+                <div className="live-preview">
+                  <div><b>Live preview</b><span>Updates automatically</span></div>
+                  <iframe
+                    title="Candidate React preview"
+                    sandbox="allow-scripts"
+                    referrerPolicy="no-referrer"
+                    srcDoc={reactPreviewDocument(previewCode)}
+                  />
+                </div>
+              </>
             )}
             {runResults && (
               <div className="test-results">
@@ -1419,6 +1515,20 @@ function AdminDashboard() {
     );
     setDetail(payload.candidate);
     return payload.candidate;
+  };
+  const handleOfferCreated = (candidate) => {
+    setData((current) => ({
+      ...current,
+      candidates: current.candidates.map((item) =>
+        item.id === candidate.id ? { ...item, ...candidate } : item,
+      ),
+    }));
+    setSelected((current) =>
+      current?.id === candidate.id ? { ...current, ...candidate } : current,
+    );
+    setDetail((current) =>
+      current?.id === candidate.id ? { ...current, ...candidate } : current,
+    );
   };
   const deleteCandidate = async (candidate) => {
     if (!window.confirm(`Delete ${candidate.name} and all of their assessment data? This cannot be undone.`)) return;
@@ -2051,6 +2161,7 @@ function AdminDashboard() {
           candidate={selected}
           detail={detail}
           updateStatus={updateHiringStatus}
+          onOfferCreated={handleOfferCreated}
           close={() => setSelected(null)}
         />
       )}
@@ -2071,10 +2182,18 @@ function Stat({ icon: Icon, label, value }) {
     </div>
   );
 }
-function CandidateDrawer({ candidate, detail, close, updateStatus }) {
+function CandidateDrawer({ candidate, detail, close, updateStatus, onOfferCreated }) {
   const [statusDraft, setStatusDraft] = useState(candidate.hiring_status);
   const [statusNote, setStatusNote] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
+  const [offerDialogOpen, setOfferDialogOpen] = useState(false);
+  const [offerForm, setOfferForm] = useState({
+    joining_date: "",
+    annual_ctc: "",
+    reference: `LUX/HR/${new Date().getFullYear()}/`,
+  });
+  const [creatingOffer, setCreatingOffer] = useState(false);
+  const [offerError, setOfferError] = useState("");
   const saveStatus = async () => {
     setSavingStatus(true);
     try {
@@ -2082,6 +2201,35 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
       setStatusNote("");
     } finally {
       setSavingStatus(false);
+    }
+  };
+  const openOfferStudio = (url = candidate.offer_studio_url) => {
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  };
+  const createOffer = async (event) => {
+    event.preventDefault();
+    setCreatingOffer(true);
+    setOfferError("");
+    const studioWindow = window.open("about:blank", "_blank");
+    try {
+      const payload = await request(
+        `/staff/candidates/${candidate.id}/offer/`,
+        { method: "POST", body: JSON.stringify(offerForm) },
+        true,
+      );
+      onOfferCreated(payload.candidate);
+      setOfferDialogOpen(false);
+      if (studioWindow) {
+        studioWindow.opener = null;
+        studioWindow.location.replace(payload.offer_url);
+      } else {
+        openOfferStudio(payload.offer_url);
+      }
+    } catch (offerRequestError) {
+      studioWindow?.close();
+      setOfferError(offerRequestError.message);
+    } finally {
+      setCreatingOffer(false);
     }
   };
   return (
@@ -2137,6 +2285,79 @@ function CandidateDrawer({ candidate, detail, close, updateStatus }) {
             <b>{candidate.address || "Not provided"}</b>
           </div>
         </div>
+        <section className="offer-studio-card">
+          <span className="offer-studio-icon"><FileText /></span>
+          <div>
+            <h3>Offer Studio</h3>
+            <p>{candidate.offer_studio_id ? "This candidate’s offer is saved in Offer Studio." : "Create and save an offer using this candidate’s registered details."}</p>
+            {candidate.offer_studio_created_at && (
+              <small>Created {new Date(candidate.offer_studio_created_at).toLocaleString()}</small>
+            )}
+          </div>
+          <button
+            className="primary"
+            onClick={() => candidate.offer_studio_id ? openOfferStudio() : setOfferDialogOpen(true)}
+          >
+            <FileText /> {candidate.offer_studio_id ? "Open offer" : "Create offer"}
+          </button>
+        </section>
+        {offerDialogOpen && (
+          <div className="offer-dialog-backdrop" onClick={() => !creatingOffer && setOfferDialogOpen(false)}>
+            <form className="offer-dialog" onSubmit={createOffer} onClick={(event) => event.stopPropagation()}>
+              <button
+                type="button"
+                className="offer-dialog-close"
+                onClick={() => setOfferDialogOpen(false)}
+                disabled={creatingOffer}
+                aria-label="Close offer form"
+              >
+                <X />
+              </button>
+              <span className="question-count">Offer Studio</span>
+              <h2>Create offer for {candidate.name}</h2>
+              <p>Contact details, address, role, and preferred location will be filled automatically.</p>
+              <label>
+                Joining date
+                <input
+                  type="date"
+                  value={offerForm.joining_date}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(event) => setOfferForm({ ...offerForm, joining_date: event.target.value })}
+                  required
+                />
+              </label>
+              <label>
+                Annual CTC (₹)
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={offerForm.annual_ctc}
+                  onChange={(event) => setOfferForm({ ...offerForm, annual_ctc: event.target.value })}
+                  placeholder="e.g. 300000"
+                  required
+                />
+              </label>
+              <label>
+                Reference number
+                <input
+                  value={offerForm.reference}
+                  maxLength="100"
+                  onChange={(event) => setOfferForm({ ...offerForm, reference: event.target.value.toUpperCase() })}
+                  placeholder="LUX/HR/2026/001"
+                  required
+                />
+              </label>
+              {offerError && <div className="error-box">{offerError}</div>}
+              <div className="offer-dialog-actions">
+                <button type="button" className="secondary" onClick={() => setOfferDialogOpen(false)} disabled={creatingOffer}>Cancel</button>
+                <button className="primary" disabled={creatingOffer}>
+                  <FileText /> {creatingOffer ? "Creating…" : "Create and open offer"}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
         <div className="workflow-editor">
           <h3>Update recruitment status</h3>
           <select
